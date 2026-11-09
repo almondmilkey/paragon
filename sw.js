@@ -1,8 +1,8 @@
 // Paragon service worker: makes the app installable and lets it open without a connection.
 // Bump VERSION whenever you publish changes so phones pick up the new files.
-const VERSION = "paragon-v2";
+const VERSION = "paragon-v3";
 const SHELL = ["./", "index.html", "styles.css", "app.js", "config.js", "manifest.webmanifest",
-  "vendor/supabase-2.118.0.js", "icons/icon-192.png", "icons/icon-512.png"];
+  "vendor/supabase-2.118.0.js", "icons/icon-192.png", "icons/icon-512.png", "icons/logo.svg"];
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));

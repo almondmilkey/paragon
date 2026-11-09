@@ -195,7 +195,7 @@ function render(){
   if (!S.month || (!A.months[S.month] && S.month !== A.curMk)) S.month = A.months[A.curMk] ? A.curMk : (A.mks[A.mks.length-1] || A.curMk);
   document.querySelectorAll("[data-nav]").forEach(b => b.setAttribute("aria-current", b.dataset.nav===S.view ? "page" : "false"));
   $("#banner").innerHTML = isDemo()
-    ? `<div class="banner"><span>●</span><span><b>Example data.</b> You're looking at 8 made-up months so you can see how Paragon works. Scan or add your first receipt and only your own data will show.</span></div>` : "";
+    ? `<div class="banner"><span>●</span><span><b>Example data.</b> You're looking at 8 made-up months so you can see how MijnParagon works. Scan or add your first receipt and only your own data will show.</span></div>` : "";
   if (!S.loaded){ $("#view").innerHTML = `<div class="empty">Loading your receipts…</div>`; return; }
   const v = {home:viewHome, products:viewProducts, inflation:viewInflation, history:viewHistory}[S.view] || viewHome;
   $("#view").innerHTML = v(A, list);
@@ -282,7 +282,7 @@ function viewInflation(A){
   ${down.length?`<div class="section"><h2>Got cheaper</h2><div class="ledger">${down.map(productRow).join("")}</div></div>`:""}
   <div class="section"><h2>By category</h2><table class="mini"><thead><tr><th>Category</th><th>Products</th><th>Change</th></tr></thead><tbody>
     ${cats.map(([c,v,n])=>`<tr><td>${esc(CAT[c])}</td><td class="muted">${n}</td><td class="chg ${chgClass(v)}">${pct(v)}</td></tr>`).join("")}</tbody></table></div>
-  <div class="card"><h3>How this is calculated</h3><p class="small muted" style="margin:6px 0 0">For every product you've bought in at least two months, Paragon takes its price per unit (per piece, kg or litre) and compares each month with that product's own starting price. Products you spend more on count more. The result is one index that starts at 100, so 105 means your usual basket costs 5% more than when you started. Promotions and switching shops move the number too, which is the point: it measures your real basket, not an official one.</p></div>`;
+  <div class="card"><h3>How this is calculated</h3><p class="small muted" style="margin:6px 0 0">For every product you've bought in at least two months, MijnParagon takes its price per unit (per piece, kg or litre) and compares each month with that product's own starting price. Products you spend more on count more. The result is one index that starts at 100, so 105 means your usual basket costs 5% more than when you started. Promotions and switching shops move the number too, which is the point: it measures your real basket, not an official one.</p></div>`;
 }
 
 function viewHistory(A, list){
@@ -313,9 +313,9 @@ function sheetAdd(){
   openSheet(`<div class="sheet-head"><h2>Add a receipt</h2>${closeBtn}</div>
   <div class="choice">
     <button data-action="scan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3.5"/></svg>
-      <span><b style="font-family:var(--display);font-size:1.05rem;font-weight:500">Scan a receipt</b><br><span class="small muted">Take a photo or pick one. Paragon reads the date, shop, products and prices; you check them before saving.${S.limit?` ${Math.max(0,S.limit-(S.used||0))} of ${S.limit} scans left this month.`:""}</span></span></button>
+      <span><b style="font-family:var(--display);font-size:1.05rem;font-weight:700">Scan a receipt</b><br><span class="small muted">Take a photo or pick one. MijnParagon reads the date, shop, products and prices; you check them before saving.${S.limit?` ${Math.max(0,S.limit-(S.used||0))} of ${S.limit} scans left this month.`:""}</span></span></button>
     <button data-action="manual"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20h4L19 9l-4-4L4 16v4zM13 7l4 4"/></svg>
-      <span><b style="font-family:var(--display);font-size:1.05rem;font-weight:500">Add an expense by hand</b><br><span class="small muted">Rent, a market stall, cash payments, anything without a receipt.</span></span></button>
+      <span><b style="font-family:var(--display);font-size:1.05rem;font-weight:700">Add an expense by hand</b><br><span class="small muted">Rent, a market stall, cash payments, anything without a receipt.</span></span></button>
   </div>`);
 }
 
@@ -326,7 +326,7 @@ function sheetSettings(){
     <div class="card small"><span class="label">Signed in as</span><br><b id="setEmail"></b></div>
     <label class="field"><span class="label">Currency</span><select id="cur">${CURRENCIES.map(c=>`<option ${c===S.currency?"selected":""}>${c}</option>`).join("")}</select></label>
     <div class="card small"><b>Scans this month</b><br><span class="muted" id="usage">${S.used!=null?`${S.used}${S.limit?` of ${S.limit}`:""} used`:"Checking…"}</span></div>
-    <div class="card small"><b>Learned corrections</b><br><span class="muted">${Object.keys(S.aliases).length} product name${Object.keys(S.aliases).length===1?"":"s"} remembered. When you fix a product name or category after a scan, Paragon applies the same fix to future receipts.</span></div>
+    <div class="card small"><b>Learned corrections</b><br><span class="muted">${Object.keys(S.aliases).length} product name${Object.keys(S.aliases).length===1?"":"s"} remembered. When you fix a product name or category after a scan, MijnParagon applies the same fix to future receipts.</span></div>
     <button class="btn ghost wide" data-action="export">Export my data (CSV)</button>
     <button class="btn ghost wide" data-action="signout">Sign out</button>
     <button class="btn danger wide" data-action="delaccount" id="delAccBtn">Delete my account and all data</button>
@@ -544,7 +544,7 @@ function exportCsv(){
     rows.push([r.date, r.store, r.source, it.product, it.name, CAT[it.category]||"Other", it.qty, it.unit, it.unitPrice, it.price, S.currency])));
   if (rows.length === 1){ toast("Nothing to export yet."); return; }
   const blob = new Blob(["﻿" + rows.map(r=>r.map(q).join(",")).join("\n")], {type:"text/csv;charset=utf-8"});
-  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `paragon-${todayISO()}.csv`;
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `mijnparagon-${todayISO()}.csv`;
   document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
 async function deleteAccount(){
@@ -566,7 +566,7 @@ function showAuth(mode, msg){
   const m = authMsg ? `<div class="msg ${authMsg.err?"err":""}">${esc(authMsg.text)}</div>` : "";
   const privacy = `<p class="foot">By creating an account you agree to the <a href="${esc(CFG.privacyUrl||"privacy.html")}" target="_blank" rel="noopener">privacy policy</a>.</p>`;
   if (!configured){
-    root.innerHTML = `<div class="auth">${BRAND}<div class="msg err">Paragon isn't connected to its database yet. Fill in <b>config.js</b> with your Supabase URL and key (see README).</div></div>`; return;
+    root.innerHTML = `<div class="auth">${BRAND}<div class="msg err">MijnParagon isn't connected to its database yet. Fill in <b>config.js</b> with your Supabase URL and key (see README).</div></div>`; return;
   }
   const forms = {
     signin: `<h2 style="text-align:center">Sign in</h2>

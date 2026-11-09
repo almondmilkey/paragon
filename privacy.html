@@ -4,54 +4,123 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Paragon · Privacy policy</title>
+<link rel="icon" type="image/png" href="icons/icon-192.png">
 <link rel="stylesheet" href="styles.css">
 <style>
   .doc{max-width:680px; margin:0 auto; padding-block:32px 60px; display:flex; flex-direction:column; gap:14px; line-height:1.6}
-  .doc h1{font-size:1.8rem} .doc h2{font-size:1.2rem; margin-top:10px}
-  .doc p,.doc li{margin:0}
-  .todo{background:var(--warn-bg); border-radius:12px; padding:12px 14px}
+  .doc h1{font-size:1.9rem} .doc h2{font-size:1.2rem; margin-top:14px}
+  .doc p,.doc li{margin:0} .doc ul{margin:0; padding-left:1.2em; display:flex; flex-direction:column; gap:4px}
+  .doc table{width:100%; border-collapse:collapse; font-size:.92rem}
+  .doc th,.doc td{text-align:left; vertical-align:top; padding:8px 6px; border-bottom:1px solid var(--line)}
+  .doc th{font-weight:600}
+  .tablewrap{overflow-x:auto}
+  .todo{background:var(--warn-bg); border-radius:12px; padding:12px 14px; font-size:.9rem}
+  .todo ul{margin-top:6px}
+  .tip{background:var(--mint); color:var(--mint-ink); border-radius:12px; padding:12px 14px}
+  mark{background:var(--warn-bg); color:inherit; padding:0 3px; border-radius:3px}
 </style>
 </head>
 <body>
 <main class="doc">
-  <div class="todo"><b>DRAFT TEMPLATE, not legal advice.</b> Replace everything in [square brackets], check each section against how you actually run Paragon, and have it reviewed before inviting people outside your circle of testers. Delete this box when done.</div>
+
+  <!-- ==== DELETE THIS BOX BEFORE PUBLISHING ==== -->
+  <div class="todo"><b>Draft, not legal advice. Before publishing:</b>
+    <ul>
+      <li>Fill in everything <mark>highlighted</mark> (correspondence address, KvK, BTW, email, dates).</li>
+      <li>Check Anthropic's current API data retention period and transfer mechanism and enter them in section 5.</li>
+      <li>Accept the Supabase DPA (organisation settings) and keep a copy of Anthropic's DPA.</li>
+      <li>Ask an AVG/GDPR adviser to review section 3: whether receipts that reveal health or similar information need explicit consent (art. 9 GDPR), for example a checkbox at sign-up.</li>
+      <li>Make sure the automatic deletion (002_privacy_cleanup.sql) is switched on, because this policy promises it.</li>
+      <li>Delete this box.</li>
+    </ul>
+  </div>
 
   <h1>Privacy policy</h1>
-  <p>Last updated: [date]</p>
+  <p class="muted">Paragon · version 1.0 · last updated <mark>[date]</mark></p>
 
-  <h2>Who is responsible</h2>
-  <p>[Your full name]<br>[Street and number]<br>[Postcode, city, country]<br>Email: [contact email]</p>
+  <p>Paragon turns photos of your shopping receipts into a monthly overview of your spending. This policy explains which data that requires, what we deliberately do <b>not</b> collect, and what you can do to share even less.</p>
 
-  <h2>What Paragon stores</h2>
+  <h2>1. Who we are</h2>
+  <p>Paragon is run by <b>AB Data Science</b>, the controller for the personal data described here.<br>
+    Correspondence address: <mark>[street and number, postcode, city], the Netherlands</mark><br>
+    KvK number: <mark>[KvK]</mark><br>
+    BTW number: <mark>[BTW-id, if applicable]</mark><br>
+    Email: <mark>[privacy@your-domain]</mark></p>
+
+  <h2>2. What we store</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Data</th><th>Why</th><th>Kept until</th></tr></thead>
+    <tbody>
+      <tr><td><b>Email address</b> and your password (stored only in hashed form, which we cannot read)</td><td>Your account, sign-in, password reset</td><td>You delete your account</td></tr>
+      <tr><td><b>Receipt data</b>: shop name, date (no time), products, quantities, prices, categories, the printed total. Also expenses you enter by hand.</td><td>Your summaries, averages, product prices and personal inflation</td><td>You delete the receipt or your account</td></tr>
+      <tr><td><b>Settings</b>: currency, product names you corrected</td><td>So corrections apply to later scans</td><td>You delete your account</td></tr>
+      <tr><td><b>Number of scans per month</b></td><td>The monthly scan limit and preventing abuse</td><td>You delete your account</td></tr>
+      <tr><td><b>Date you last used the app</b> (no time, no device)</td><td>Deleting unused accounts (section 6)</td><td>You delete your account</td></tr>
+      <tr><td><b>Technical logs</b>: IP address, time, request type</td><td>Security and fixing errors</td><td>A few days, kept by our providers <mark>[check Supabase log retention for your plan]</mark></td></tr>
+    </tbody>
+  </table></div>
+
+  <p><b>Receipt photos are not stored.</b> A photo is reduced in size on your phone, sent once to be read, and then discarded. It is not saved in our database and not kept on our servers.</p>
+
+  <p><b>We do not collect:</b> your name, phone number, home address, location, contacts, card numbers (not even the last digits), loyalty card numbers, the shop's address or the time of purchase. We instruct the reading service to leave such details out. Paragon has no advertising, no analytics, no tracking cookies and does not sell or share your data. Fonts and code are served from our own site, not from third parties.</p>
+
+  <h2>3. Receipts can say more than you think</h2>
+  <p>A list of purchases can indirectly reveal sensitive things: medicines or pregnancy tests (health), alcohol, halal or kosher products (religion, habits), contraceptives and similar. We do not analyse your receipts for such information, do not build profiles from it and never share it. It is only used to show <i>you</i> your own spending.</p>
+  <div class="tip"><b>Want more privacy?</b>
+    <ul>
+      <li>Don't scan receipts with purchases you consider private, for example from a pharmacy, or certain cosmetics or alcohol.</li>
+      <li>Add them by hand instead, with a neutral name such as "personal care" or "other", so your totals stay correct.</li>
+      <li>After a scan you can delete or rename any line before saving, and edit or delete any receipt later.</li>
+    </ul>
+  </div>
+
+  <h2>4. Legal basis</h2>
   <ul>
-    <li><b>Account:</b> your email address and a hashed password.</li>
-    <li><b>Receipts and expenses:</b> shop name, date, products, quantities, prices and categories that you scan or enter.</li>
-    <li><b>Settings:</b> your currency and the product-name corrections you make.</li>
-    <li><b>Scan counter:</b> how many receipts you scanned per month, to enforce the monthly limit.</li>
+    <li><b>Performance of the agreement</b> with you (art. 6(1)(b) GDPR / AVG): your account, storing your receipts and calculating your overview.</li>
+    <li><b>Legitimate interest</b> (art. 6(1)(f)): the scan limit, technical logs and keeping the service secure.</li>
   </ul>
-  <p>Receipt photos are <b>not stored</b>. A photo is sent once for reading and then discarded.</p>
 
-  <h2>Why, and on what legal basis</h2>
-  <p>We process this data to provide the service you signed up for: storing your expenses and calculating your summaries (Art. 6(1)(b) GDPR, performance of a contract).</p>
+  <h2>5. Who helps us (processors)</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Provider</th><th>What they do</th><th>Where</th></tr></thead>
+    <tbody>
+      <tr><td><b>Supabase</b> (Supabase Inc.)</td><td>Database, sign-in, server functions</td><td>Data stored in the EU (Frankfurt, Germany). Supabase is a US company; transfers are covered by its data processing agreement with EU Standard Contractual Clauses.</td></tr>
+      <tr><td><b>Anthropic</b> (Anthropic PBC)</td><td>Reads the receipt photo and returns the text as structured data</td><td>United States. Covered by Anthropic's data processing agreement <mark>[transfer mechanism, e.g. EU Standard Contractual Clauses]</mark>. Anthropic does not use this data to train its models and keeps it for at most <mark>[X days, per Anthropic's current API terms]</mark>.</td></tr>
+      <tr><td><b>GitHub</b> (GitHub Inc., Microsoft)</td><td>Delivers the app's files (GitHub Pages)</td><td>United States; may log your IP address when the app loads.</td></tr>
+      <tr><td><mark>[Email provider, once set up]</mark></td><td>Sends confirmation and password emails</td><td><mark>[location]</mark></td></tr>
+    </tbody>
+  </table></div>
+  <p>These providers may only use your data to provide their service to us.</p>
 
-  <h2>Who processes data for us</h2>
+  <h2>6. How long we keep data</h2>
   <ul>
-    <li><b>Supabase</b> (database, sign-in, server functions). Data is stored in the EU (Frankfurt, Germany). [Link to Supabase DPA]</li>
-    <li><b>Anthropic</b> (reads receipt photos). The photo is sent to Anthropic's API in the United States, processed and returned. [Describe the transfer mechanism stated in Anthropic's data processing terms, e.g. EU Standard Contractual Clauses / EU-US Data Privacy Framework, and link to them.] Per Anthropic's API terms, API data is not used to train models [verify current terms].</li>
-    <li><b>GitHub Pages</b> (delivers the app's files). GitHub may log your IP address when the page loads. [Link to GitHub privacy statement]</li>
+    <li>Until you delete it. Settings → "Delete my account and all data" removes your account, receipts, settings and scan counters immediately.</li>
+    <li><b>Accounts not used for 12 months are deleted automatically</b>, with all their data. "Used" means opening the app while signed in. Export your data first if you want to keep it.</li>
+    <li>Sign-ups whose email address was never confirmed are deleted after 7 days.</li>
+    <li>Backups made by our database provider may contain deleted data for up to <mark>[7 days, check your Supabase plan]</mark>, after which it is overwritten.</li>
   </ul>
-  <p>Paragon uses no analytics, no advertising and no tracking cookies. Fonts are served from our own site.</p>
 
-  <h2>How long data is kept</h2>
-  <p>Until you delete your account. In the app: Settings → "Delete my account and all data" removes your account, receipts, settings and scan counter immediately.</p>
+  <h2>7. Security</h2>
+  <ul>
+    <li>All connections are encrypted (HTTPS) and data is encrypted at rest.</li>
+    <li>The database itself makes sure every user can reach only their own data.</li>
+    <li>Secret keys exist only on the server, never in the app.</li>
+    <li>Passwords are stored hashed. Choose a password you don't use elsewhere.</li>
+  </ul>
 
-  <h2>Your rights</h2>
-  <p>You can access, correct, export (Settings → "Export my data") and delete your data, restrict or object to processing, and complain to a data protection authority, for example [the authority of your federal state, e.g. Berliner Beauftragte für Datenschutz und Informationsfreiheit].</p>
+  <h2>8. Automated processing</h2>
+  <p>An AI model reads the text on your receipt and suggests a product name and category. You can check and correct every line. It makes no decisions about you and has no legal or similar effect on you.</p>
 
-  <h2>Contact</h2>
-  <p>[contact email]</p>
+  <h2>9. Your rights</h2>
+  <p>You have the right to access, correct, delete and receive your data (Settings → "Export my data" gives you everything as a CSV file), to restrict or object to processing, and to withdraw any consent. Write to <mark>[privacy@your-domain]</mark>; we reply within one month. You can also complain to the Dutch data protection authority, the <a href="https://autoriteitpersoonsgegevens.nl" target="_blank" rel="noopener">Autoriteit Persoonsgegevens</a>.</p>
 
-  <p><a href="./">Back to Paragon</a></p>
+  <h2>10. Age</h2>
+  <p>Paragon is intended for people aged 16 and over.</p>
+
+  <h2>11. Changes</h2>
+  <p>If we change this policy, we update the date at the top. If a change affects how your data is used, we tell you in the app or by email before it takes effect.</p>
+
+  <p style="margin-top:16px"><a href="./">← Back to Paragon</a></p>
 </main>
 </body>
 </html>

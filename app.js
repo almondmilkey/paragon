@@ -425,8 +425,11 @@ async function deleteDraft(){
 
 /* ---------- backend (Supabase) ---------- */
 const CFG = window.PARAGON_CONFIG || {};
-const configured = CFG.supabaseUrl && !/YOUR-/.test(CFG.supabaseUrl + CFG.supabaseKey);
-const sb = configured ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseKey) : null;
+const configured = !!(CFG.supabaseUrl && CFG.supabaseKey && window.supabase) && !/YOUR-/.test(CFG.supabaseUrl + CFG.supabaseKey);
+// Accept the project URL with or without a trailing "/" or "/rest/v1/".
+const SB_URL = String(CFG.supabaseUrl || "").trim().replace(/\/+$/, "").replace(/\/rest\/v1$/, "");
+let sb = null;
+try { if (configured) sb = window.supabase.createClient(SB_URL, String(CFG.supabaseKey).trim()); } catch(e){ console.error(e); }
 const thisMonth = () => new Date().toISOString().slice(0,7);
 const fromRow = r => ({id:r.id, date:r.date, store:r.store||"", items:r.items||[], source:r.source, printedTotal: r.printed_total==null ? null : Number(r.printed_total), createdAt:r.created_at});
 
@@ -441,6 +444,13 @@ async function loadData(){
   if (prof.data){ S.currency = prof.data.currency || "EUR"; S.aliases = prof.data.aliases || {}; fmtCache = {}; }
   S.loaded = true; render();
   refreshUsage();
+  markActive(prof.data);
+}
+// Records the day of last use (no time, no device). Accounts unused for 12 months are deleted.
+async function markActive(profile){
+  const today = todayISO();
+  if (profile && profile.last_active_at === today) return;
+  await sb.from("profiles").upsert({user_id:S.user.id, last_active_at:today});
 }
 async function refreshUsage(){
   if (!sb || !S.user) return;

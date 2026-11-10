@@ -1,4 +1,4 @@
-
+ 
 (() => {
 "use strict";
 /* ---------- constants ---------- */
@@ -12,14 +12,14 @@ const CURRENCIES = ["EUR","PLN","USD","GBP","CHF"];
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const MONTHS_LONG = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const LS_R = "paragon.receipts.v1", LS_P = "paragon.profile.v1";
-
+ 
 /* ---------- state ---------- */
 const S = {
   view: "home", month: null, openCat: null, q: "",
   real: [], loaded: false, currency: "EUR", aliases: {},
   user: null, draft: null, scanCtl: null, used: null, limit: null
 };
-
+ 
 /* ---------- helpers ---------- */
 const $ = s => document.querySelector(s);
 const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -43,7 +43,7 @@ const fmtDate = iso => { if(!iso) return ""; const [y,m,d] = iso.split("-"); ret
 const rid = () => (crypto.randomUUID ? crypto.randomUUID() : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)));
 const receiptTotal = r => r2(sum((r.items||[]).map(i => num(i.price))));
 function toast(msg){ const t = document.createElement("div"); t.className="toast"; t.textContent=msg; $("#toastRoot").replaceChildren(t); setTimeout(()=>t.remove(), 2600); }
-
+ 
 /* ---------- example data (deterministic) ---------- */
 function makeDemo(){
   let seed = 7; const rnd = () => (seed = (seed*16807) % 2147483647) / 2147483647;
@@ -93,7 +93,7 @@ function makeDemo(){
 const DEMO = makeDemo();
 const receipts = () => S.real.length ? S.real : (S.loaded ? DEMO : []);
 const isDemo = () => S.loaded && S.real.length === 0;
-
+ 
 /* ---------- analysis ---------- */
 function analyze(list){
   const months = {}, products = {};
@@ -140,7 +140,7 @@ function analyze(list){
     .sort((a,b)=> b.share - a.share || b.total - a.total);
   return {months, mks, stats, products, staples, curMk};
 }
-
+ 
 /* spend-weighted personal price index: each product against its own starting price */
 const NO_INDEX = new Set(["housing","eating_out","clothes","leisure","health","transport"]);
 function priceIndex(A, filterCat){
@@ -156,7 +156,7 @@ function priceIndex(A, filterCat){
   if (pts.length){ const f = 100 / pts[0].v; pts.forEach(p => p.v *= f); }
   return {pts, count: elig.length};
 }
-
+ 
 /* ---------- charts ---------- */
 function niceMax(v){ if (v <= 0) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))); const n = v/p; return (n<=1?1:n<=2?2:n<=2.5?2.5:n<=5?5:10)*p; }
 function barChart(A, sel){
@@ -188,7 +188,7 @@ function lineChart(pts, opts={}){
   const li = pts.length-1; g += `<circle class="dot" cx="${x(li)}" cy="${y(pts[li].v)}" r="3.5"/><text class="end" x="${x(li)+6}" y="${y(pts[li].v)+3}">${esc(f(pts[li].v))}</text>`;
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(opts.label||"Trend")}">${g}</svg>`;
 }
-
+ 
 /* ---------- views ---------- */
 function render(){
   const list = receipts(); const A = analyze(list);
@@ -201,7 +201,7 @@ function render(){
   $("#view").innerHTML = v(A, list);
   const qi = $("#q"); if (qi && S._focusQ){ qi.focus(); qi.setSelectionRange(qi.value.length, qi.value.length); }
 }
-
+ 
 function viewHome(A){
   const mk = S.month, M = A.months[mk] || {total:0, cats:{}, prods:{}, count:0};
   const idx = A.mks.indexOf(mk);
@@ -241,7 +241,7 @@ function viewHome(A){
     <table class="mini"><tbody>${prods.map(([k,v])=>`<tr><td style="text-transform:capitalize">${esc(A.products[k]?.label||k)}</td><td>${money(v)}</td></tr>`).join("")}</tbody></table></div>`:""}
   <div class="card soon"><span class="tag">Coming later</span><h3>You vs. similar households</h3><span class="small muted">Compare your categories with households of the same size, city and income band, and see how spending habits shift over time. This needs shared, anonymised data, so it will come in a later version.</span></div>`;
 }
-
+ 
 function productRow(P){
   const ch = P.change;
   return `<button class="prod" data-prod="${esc(P.key)}">
@@ -261,7 +261,7 @@ function viewProducts(A){
     <input class="search" id="q" type="search" placeholder="Search products or categories" value="${esc(S.q)}" aria-label="Search products">
     ${(q?filtered:filtered.filter(P=>!stapleKeys.has(P.key))).map(productRow).join("") || `<div class="empty">No products match.</div>`}</div>`;
 }
-
+ 
 function viewInflation(A){
   const I = priceIndex(A);
   if (A.mks.length < 2 || I.count === 0) return `<div class="section"><h1>Your inflation</h1><div class="empty">Your personal inflation appears once you've bought the same products in at least two different months.</div></div>`;
@@ -284,7 +284,7 @@ function viewInflation(A){
     ${cats.map(([c,v,n])=>`<tr><td>${esc(CAT[c])}</td><td class="muted">${n}</td><td class="chg ${chgClass(v)}">${pct(v)}</td></tr>`).join("")}</tbody></table></div>
   <div class="card"><h3>How this is calculated</h3><p class="small muted" style="margin:6px 0 0">For every product you've bought in at least two months, MijnParagon takes its price per unit (per piece, kg or litre) and compares each month with that product's own starting price. Products you spend more on count more. The result is one index that starts at 100, so 105 means your usual basket costs 5% more than when you started. Promotions and switching shops move the number too, which is the point: it measures your real basket, not an official one.</p></div>`;
 }
-
+ 
 function viewHistory(A, list){
   const byM = {}; list.forEach(r => (byM[mkOf(r.date)] ||= []).push(r));
   const mks = Object.keys(byM).sort().reverse();
@@ -296,7 +296,7 @@ function viewHistory(A, list){
       <span class="st">${esc(r.store||"Expense")}</span><span class="num" style="font-family:var(--display)">${money(receiptTotal(r))}</span>
       <span class="meta">${fmtDate(r.date)} · ${(r.items||[]).length} item${(r.items||[]).length===1?"":"s"} <span class="tag ${r.source==="manual"?"manual":"scan"}">${r.source==="manual"?"manual":"scanned"}</span></span></button>`).join("")}</div></div>`).join("") || `<div class="empty">No receipts yet. Tap the button below to scan one.</div>`}`;
 }
-
+ 
 /* ---------- sheets ---------- */
 function openSheet(html){
   $("#sheetRoot").innerHTML = `<div class="scrim" data-scrim><div class="sheet" role="dialog" aria-modal="true">${html}</div></div>`;
@@ -308,7 +308,7 @@ function closeSheet(){
   S.draft = null; $("#sheetRoot").innerHTML = ""; document.body.style.overflow = "";
 }
 const closeBtn = `<button class="icon-btn" data-action="close" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`;
-
+ 
 function sheetAdd(){
   openSheet(`<div class="sheet-head"><h2>Add a receipt</h2>${closeBtn}</div>
   <div class="choice">
@@ -318,7 +318,7 @@ function sheetAdd(){
       <span><b style="font-family:var(--display);font-size:1.05rem;font-weight:700">Add an expense by hand</b><br><span class="small muted">Rent, a market stall, cash payments, anything without a receipt.</span></span></button>
   </div>`);
 }
-
+ 
 function sheetSettings(){
   const cfg = window.PARAGON_CONFIG || {};
   openSheet(`<div class="sheet-head"><h2>Settings</h2>${closeBtn}</div>
@@ -335,7 +335,7 @@ function sheetSettings(){
   $("#setEmail").textContent = S.user?.email || "";
   refreshUsage().then(() => { const u = $("#usage"); if (u && S.used != null) u.textContent = `${S.used}${S.limit?` of ${S.limit}`:""} used`; });
 }
-
+ 
 function sheetProduct(k){
   const A = analyze(receipts()); const P = A.products[k]; if (!P) return;
   const unit = P.unit==="kg"?"kg":P.unit==="l"?"litre":"piece";
@@ -356,7 +356,7 @@ function sheetProduct(k){
     <div class="card small" style="display:flex;flex-direction:column;gap:6px">${notes.map(n=>`<span>${esc(n)}</span>`).join("")}</div>
     ${P.stores.length?`<table class="mini"><thead><tr><th>Shop</th><th>Bought</th><th>Avg / ${unit}</th></tr></thead><tbody>${P.stores.map(([s,p,n])=>`<tr><td>${esc(s)}</td><td class="muted">${n}×</td><td>${money(p)}</td></tr>`).join("")}</tbody></table>`:""}`);
 }
-
+ 
 /* ---------- editor ---------- */
 function blankItem(){ return {name:"", product:"", category:"other", qty:1, unit:"pcs", unitPrice:0, price:0}; }
 function startEditor(draft){ S.draft = draft; renderEditor(); }
@@ -422,7 +422,7 @@ async function deleteDraft(){
   if (!b.dataset.armed){ b.dataset.armed = "1"; b.textContent = "Tap again to delete"; setTimeout(()=>{ if(b.isConnected){ delete b.dataset.armed; b.textContent = "Delete"; } }, 3000); return; }
   try { await removeReceipt(S.draft.id); closeSheet(); render(); toast("Deleted"); } catch(e){ toast("Couldn't delete. Try again."); }
 }
-
+ 
 /* ---------- backend (Supabase) ---------- */
 const CFG = window.PARAGON_CONFIG || {};
 const configured = !!(CFG.supabaseUrl && CFG.supabaseKey && window.supabase) && !/YOUR-/.test(CFG.supabaseUrl + CFG.supabaseKey);
@@ -432,7 +432,7 @@ let sb = null;
 try { if (configured) sb = window.supabase.createClient(SB_URL, String(CFG.supabaseKey).trim()); } catch(e){ console.error(e); }
 const thisMonth = () => new Date().toISOString().slice(0,7);
 const fromRow = r => ({id:r.id, date:r.date, store:r.store||"", items:r.items||[], source:r.source, printedTotal: r.printed_total==null ? null : Number(r.printed_total), createdAt:r.created_at});
-
+ 
 async function loadData(){
   S.loaded = false; render();
   const [rec, prof] = await Promise.all([
@@ -473,7 +473,7 @@ async function persistProfile(){
   const {error} = await sb.from("profiles").upsert({user_id:S.user.id, currency:S.currency, aliases:S.aliases, updated_at:new Date().toISOString()});
   if (error) throw error;
 }
-
+ 
 /* ---------- scanning ---------- */
 // Shrinks the photo on the phone before upload: faster, cheaper, and the AI doesn't need more.
 async function prepareImage(file){
@@ -487,7 +487,7 @@ async function prepareImage(file){
   const dataUrl = await new Promise(ok => { const r = new FileReader(); r.onload = () => ok(r.result); r.readAsDataURL(blob); });
   return String(dataUrl).split(",")[1];
 }
-
+ 
 async function runScan(file){
   const url = URL.createObjectURL(file);
   S.draft = {imageUrl:url, source:"scan", items:[]};
@@ -496,14 +496,15 @@ async function runScan(file){
     <img class="thumb" src="${url}" alt="Your receipt photo">
     <div class="scanning"><div class="progress"><i></i></div><span class="muted small">Reading shop, date, products and prices… this usually takes 5–20 seconds.</span>
     <button class="btn ghost" data-action="close">Stop</button></div>`);
-  let code = "server_error";
+  let code = "server_error", detail = "";
   try {
     const image = await prepareImage(file);
     if (ctl.signal.aborted) return;
     const {data, error} = await sb.functions.invoke("scan-receipt", {body:{image, mediaType:"image/jpeg"}, signal: ctl.signal});
     if (ctl.signal.aborted) return;
     if (error){
-      try { const b = await error.context.json(); code = b.error || code; if (b.limit) S.limit = b.limit; } catch(_){ code = navigator.onLine ? "server_error" : "offline"; }
+      detail = `${error.name || "Error"}: ${error.message || ""}` + (error.context?.status ? ` (HTTP ${error.context.status})` : "");
+      try { const b = await error.context.json(); code = b.error || code; if (b.limit) S.limit = b.limit; detail += ` · ${JSON.stringify(b).slice(0,200)}`; } catch(_){ code = navigator.onLine ? "server_error" : "offline"; }
       throw new Error(code);
     }
     S.scanCtl = null;
@@ -519,6 +520,8 @@ async function runScan(file){
   } catch(e){
     if (ctl.signal.aborted || e?.name === "AbortError") return;
     S.scanCtl = null;
+    if (!detail) detail = `${e?.name || "Error"}: ${e?.message || e}`;
+    console.error("scan failed", code, detail, e);
     code = e?.message && e.message !== "Failed to fetch" ? e.message : code;
     const msg = {
       not_receipt: "That doesn't look like a receipt. Try a sharper, well-lit photo of the whole slip.",
@@ -532,10 +535,11 @@ async function runScan(file){
     openSheet(`<div class="sheet-head"><h2>Couldn't read it</h2>${closeBtn}</div>
       ${S.draft?.imageUrl?`<img class="thumb" src="${S.draft.imageUrl}" alt="Your receipt photo">`:""}
       <div class="warn">${esc(msg)}</div>
+      <details class="small muted"><summary>Technical details</summary><code style="word-break:break-all">${esc(code)} · ${esc(detail)} · ${esc(location.origin)}</code></details>
       <div class="actions">${code!=="limit_reached"?`<button class="btn" data-action="scan">Try another photo</button>`:""}<button class="btn ghost" data-action="manual-keep">Enter by hand</button></div>`);
   }
 }
-
+ 
 /* ---------- export & account ---------- */
 function exportCsv(){
   const q = v => { const s = String(v ?? ""); return /[",\n;]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; };
@@ -555,7 +559,7 @@ async function deleteAccount(){
   if (error){ b.disabled = false; b.textContent = "Delete my account and all data"; toast("Couldn't delete the account. Try again."); return; }
   closeSheet(); await sb.auth.signOut(); toast("Your account and data were deleted.");
 }
-
+ 
 /* ---------- sign-in screens ---------- */
 const BRAND = document.querySelector(".brand").outerHTML;
 let authMode = "signin", authMsg = null;
@@ -618,7 +622,7 @@ function enterApp(){
   $("#authRoot").hidden = true; $("#app").hidden = false; $("#tabs").hidden = false;
   loadData();
 }
-
+ 
 /* ---------- events ---------- */
 document.addEventListener("click", e => {
   const au = e.target.closest("[data-auth]"); if (au){ showAuth(au.dataset.auth); return; }
@@ -658,7 +662,7 @@ document.addEventListener("change", async e => {
 document.addEventListener("keydown", e => { if (e.key === "Escape" && $("#sheetRoot").firstChild) closeSheet(); });
 function fromHash(){ const h = location.hash.slice(1); if (["home","products","inflation","history"].includes(h)){ S.view = h; if (S.user) render(); } }
 window.addEventListener("hashchange", fromHash);
-
+ 
 /* ---------- boot ---------- */
 const h0 = location.hash.slice(1); if (["home","products","inflation","history"].includes(h0)) S.view = h0;
 if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(()=>{});

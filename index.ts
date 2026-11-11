@@ -1,13 +1,6 @@
 // Paragon: scan-receipt
 // Receives a receipt photo from a signed-in user, checks their monthly scan limit,
 // asks Claude (Anthropic API) to read it and returns structured JSON.
-//
-// Secrets to set in Supabase (Dashboard -> Edge Functions -> Secrets):
-//   ANTHROPIC_API_KEY      required, from console.anthropic.com
-//   ANTHROPIC_MODEL        optional, default "claude-haiku-4-5"
-//   SCAN_LIMIT_PER_MONTH   optional, default 50
-//   ALLOWED_ORIGIN         optional, e.g. "https://yourname.github.io" (default "*")
-// SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are provided by Supabase automatically.
 
 import { createClient } from "npm:@supabase/supabase-js@2.118.0";
 
@@ -21,7 +14,9 @@ const json = (body: unknown, status = 200) =>
 
 const CATEGORIES = [
   "bakery", "dairy", "meat", "produce", "pantry", "snacks", "drinks", "alcohol", "household",
-  "hygiene", "clothes", "transport", "eating_out", "health", "leisure", "housing", "other",
+  "hygiene", "clothes", "transport", "eating_out", "health", "leisure", "housing", "child_care",
+  "pet_care", "telecommunications", "insurance_financial", "education", "arts_culture",
+  "sports_fitness", "specialized equipment","other",
 ];
 
 const PROMPT = `The image is a photo of a shopping receipt (any country or language). Extract its contents.

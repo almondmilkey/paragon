@@ -4,9 +4,12 @@
 /* ---------- constants ---------- */
 const CATS = [
   ["bakery","Bread & bakery"],["dairy","Dairy & cheese"],["meat","Meat & fish"],["produce","Fruit & veg"],
-  ["pantry","Pantry"],["snacks","Snacks & sweets"],["drinks","Drinks"],["alcohol","Alcohol"],["household","Household"],
+  ["pantry","Pantry"],["snacks","Snacks & sweets"],["drinks","Drinks"],["alcohol","Alcohol & tobacco"],["household","Household"],
   ["hygiene","Hygiene & cosmetics"],["clothes","Clothes"],["transport","Transport"],["eating_out","Eating out"],
-  ["health","Health"],["leisure","Leisure"],["housing","Rent & utilities"],["other","Other"]];
+  ["health","Health"],["leisure","Leisure & subscriptions"],["housing","Rent & utilities"],
+  ["child_care","Child care"],["pet_care","Pet care"],["telecommunications","Telecommunications"],
+  ["insurance_financial","Insurance & financial services"],["education","Education"],
+  ["arts_culture","Arts & culture"],["sports_fitness","Sports & fitness"],["specialized_equipment","Specialized equipment"],["other","Other"]];
 const CAT = Object.fromEntries(CATS);
 const CURRENCIES = ["EUR","PLN","USD","GBP","CHF"];
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];

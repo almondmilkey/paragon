@@ -238,8 +238,7 @@ function viewHome(A){
     ${cats.length ? `<div class="ledger">${rowsHtml}</div>` : `<div class="empty">No expenses in ${mkLabel(mk,true)} yet.</div>`}
   </div>
   ${prods.length ? `<div class="section"><div class="section-head"><h2>Top products</h2><button class="linkbtn" data-nav="products">All products</button></div>
-    <table class="mini"><tbody>${prods.map(([k,v])=>`<tr><td style="text-transform:capitalize">${esc(A.products[k]?.label||k)}</td><td>${money(v)}</td></tr>`).join("")}</tbody></table></div>`:""}
-  <div class="card soon"><span class="tag">Coming later</span><h3>You vs. similar households</h3><span class="small muted">Compare your categories with households of the same size, city and income band, and see how spending habits shift over time. This needs shared, anonymised data, so it will come in a later version.</span></div>`;
+    <table class="mini"><tbody>${prods.map(([k,v])=>`<tr><td style="text-transform:capitalize">${esc(A.products[k]?.label||k)}</td><td>${money(v)}</td></tr>`).join("")}</table></div>`:""}`;
 }
  
 function productRow(P){

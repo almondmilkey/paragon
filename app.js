@@ -231,7 +231,7 @@ function viewHome(A){
     <div class="stat"><span class="label">Std deviation</span><span class="v num">${s?"± "+money(s,0):"—"}</span></div>
     <div class="stat"><span class="label">Typical range</span><span class="v num" style="font-size:.95rem;white-space:normal;line-height:1.25">${avg&&s?`${money(Math.max(0,avg-s),0)}–<br>${money(avg+s,0)}`:"—"}</span></div>
   </div>
-  <p class="small muted" style="margin:-8px 0 0">${n?`Based on ${n} complete month${n===1?"":"s"}. The current month, and a first month you only partly tracked, are left out.`:"Averages appear once you have a complete month of receipts."}</p>
+  <p class="small muted stats-note">${n?`Based on ${n} complete month${n===1?"":"s"}. The current month, and a first month you only partly tracked, are left out.`:"Averages appear once you have a complete month of receipts."}</p>
   <div class="section">${barChart(A, mk)}<span class="small muted">Bars: monthly totals. Dashed line: your average.</span></div>
   <div class="section">
     <div class="section-head"><h2>Spending per category</h2></div>

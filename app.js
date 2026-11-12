@@ -18,7 +18,7 @@ const LS_R = "paragon.receipts.v1", LS_P = "paragon.profile.v1";
  
 /* ---------- state ---------- */
 const S = {
-  view: "home", month: null, openCat: null, q: "",
+  view: "home", month: null, openCat: null, q: "", withFixed: false,
   real: [], loaded: false, currency: "EUR", aliases: {},
   user: null, draft: null, scanCtl: null, used: null, limit: null
 };
@@ -253,6 +253,68 @@ function render(){
   const qi = $("#q"); if (qi && S._focusQ){ qi.focus(); qi.setSelectionRange(qi.value.length, qi.value.length); }
 }
  
+/* ---------- spending pace & where the money goes ---------- */
+const FIXED_COSTS = ["housing","insurance_financial","telecommunications"];
+const PARETO_OUT = ["housing","insurance_financial","telecommunications","transport","education","child_care","eating_out"];
+const catList = ids => ids.map(c => CAT[c]).join(", ");
+const daysIn = mk => { const [y,m] = mk.split("-").map(Number); return new Date(y, m, 0).getDate(); };
+// a[d] = money spent from the 1st up to and including day d (stays flat after the month ends)
+function cumDays(list, mk, withFixed){
+  const n = daysIn(mk), a = Array(32).fill(0);
+  for (const r of list){
+    if (mkOf(r.date) !== mk) continue;
+    const d = Math.min(n, +String(r.date).slice(8,10) || 1);
+    for (const it of r.items || []){ const c = CAT[it.category] ? it.category : "other"; if (!withFixed && FIXED_COSTS.includes(c)) continue; a[d] += num(it.price); }
+  }
+  for (let d = 1; d <= 31; d++) a[d] += a[d-1];
+  return a;
+}
+function paceChart(mk, cur, avg, lastDay){
+  const W=340,H=170,L=40,B=20,T=14,R=48, n = daysIn(mk);
+  const max = niceMax(Math.max(cur[lastDay], avg ? avg[n] : 0, 1));
+  const x = d => L + (d-1)*(W-L-R)/(n-1), y = v => T + (H-T-B)*(1 - v/max);
+  let g = "";
+  [0,.5,1].forEach(f => { const yy = y(max*f); g += `<line class="grid" x1="${L}" x2="${W-R}" y1="${yy}" y2="${yy}"/><text x="${L-6}" y="${yy+3}" text-anchor="end">${esc(money(max*f,0))}</text>`; });
+  if (avg){ let d = ""; for (let i = 1; i <= n; i++) d += `${i>1?"L":"M"}${x(i).toFixed(1)},${y(avg[i]).toFixed(1)}`; g += `<path class="avg" d="${d}"/>`; }
+  let d = ""; for (let i = 1; i <= lastDay; i++) d += `${i>1?"L":"M"}${x(i).toFixed(1)},${y(cur[i]).toFixed(1)}`;
+  if (lastDay > 1) g += `<path class="area" d="${d}L${x(lastDay)},${H-B}L${L},${H-B}Z"/><path class="line" d="${d}"/>`;
+  [1,8,15,22,n].forEach(i => { g += `<text x="${x(i)}" y="${H-5}" text-anchor="middle">${i}</text>`; });
+  g += `<circle class="dot" cx="${x(lastDay)}" cy="${y(cur[lastDay])}" r="3.5"/><text class="end" x="${x(lastDay)+6}" y="${y(cur[lastDay])+3}">${esc(money(cur[lastDay],0))}</text>`;
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Spending so far this month, day by day">${g}</svg>`;
+}
+function paceSection(A, list, mk){
+  const isCur = mk === A.curMk, n = daysIn(mk), today = isCur ? Math.min(n, +todayISO().slice(8,10)) : n;
+  const cur = cumDays(list, mk, S.withFixed);
+  const base = A.mks.filter(m => m < A.curMk && m !== mk && !(m === A.mks[0] && A.months[m].minDay > 5));
+  let avg = null;
+  if (base.length){ const arrs = base.map(m => cumDays(list, m, S.withFixed)); avg = Array.from({length:32}, (_, d) => mean(arrs.map(a => a[d]))); }
+  let lead;
+  if (!avg) lead = "Your usual pace appears once you have a complete month of receipts.";
+  else if (isCur){ const proj = cur[today] + (avg[n] - avg[today]), diff = proj - avg[n];
+    lead = `At your usual pace you'll end ${esc(MONTHS_LONG[+mk.slice(5)-1])} at about <b class="num">${money(proj,0)}</b>, ${Math.abs(diff) < 1 ? "the same as" : `<b class="chg ${diff>0?"up":"down"}">${money(Math.abs(diff),0)} ${diff>0?"above":"below"}</b>`} an average month.`; }
+  else { const diff = cur[n] - avg[n];
+    lead = `You ended ${esc(MONTHS_LONG[+mk.slice(5)-1])} at <b class="num">${money(cur[n],0)}</b>, ${Math.abs(diff) < 1 ? "the same as" : `<b class="chg ${diff>0?"up":"down"}">${money(Math.abs(diff),0)} ${diff>0?"above":"below"}</b>`} an average month.`; }
+  const note = (S.withFixed ? "Includes every category, rent and bills too." : `Left out: ${esc(catList(FIXED_COSTS))}. These fixed costs are usually paid on one day and would hide your everyday pace. Use the button above to include them.`)
+    + (avg ? ` Dashed line: your average of ${base.length} complete month${base.length===1?"":"s"}${base.length < A.mks.length ? " (the running month and a partly tracked first month don't count)" : ""}.` : "");
+  return `<div class="section pace">
+    <div class="section-head"><h2>Spending pace</h2><button class="chip" data-action="togglefixed" aria-pressed="${S.withFixed}">${S.withFixed ? "Rent &amp; bills included" : "Rent &amp; bills left out"}</button></div>
+    <p class="pace-lead">${lead}</p>
+    ${paceChart(mk, cur, avg, today)}
+    <p class="small muted chart-note">${note}</p></div>`;
+}
+function paretoSection(A){
+  const ps = Object.values(A.products).filter(P => !PARETO_OUT.includes(P.category) && P.total > 0).sort((a,b) => b.total - a.total);
+  if (ps.length < 6) return "";
+  const tot = sum(ps.map(P => P.total)), top = ps.slice(0,5), topShare = sum(top.map(P => P.total))/tot;
+  let cum = 0;
+  const rows = top.map(P => { const sh = P.total/tot; cum += sh;
+    return `<button class="pareto-row" data-prod="${esc(P.key)}"><span class="pn">${esc(P.label)}</span><span class="num">${money(P.total)} · ${(sh*100).toFixed(0)}%</span><span class="meter"><i style="width:${(sh*100).toFixed(1)}%"></i></span><span class="small muted cum">${(cum*100).toFixed(0)}% together</span></button>`; }).join("");
+  return `<div class="section pareto"><div class="section-head"><h2>Where most of your money goes</h2></div>
+    <p class="pace-lead">Your top 5 products are <b>${(topShare*100).toFixed(0)}%</b> of your shopping, out of ${ps.length} products you've bought. Small savings on these matter most.</p>
+    <div class="ledger">${rows}<div class="pareto-rest"><span>Other ${ps.length-5} products</span><span class="num">${money(tot - sum(top.map(P => P.total)))} · ${((1-topShare)*100).toFixed(0)}%</span></div></div>
+    <p class="small muted chart-note">All your receipts so far. Left out: ${esc(catList(PARETO_OUT))}. These are services and fixed costs rather than products, so they would hide the rest. Bars show each product's share of the total.</p></div>`;
+}
+
 function viewHome(A, list){
   const mk = S.month, M = A.months[mk] || {total:0, cats:{}, prods:{}, count:0, premium:0, premCats:{}, premProds:{}};
   const idx = A.mks.indexOf(mk);
@@ -283,17 +345,18 @@ function viewHome(A, list){
     <div class="stat"><span class="label">Typical range</span><span class="v num" style="font-size:.95rem;white-space:normal;line-height:1.25">${avg&&s?`${money(Math.max(0,avg-s),0)}–<br>${money(avg+s,0)}`:"—"}</span></div>
   </div>
   <p class="small muted stats-note">${n?`Based on ${n} complete month${n===1?"":"s"}. The current month, and a first month you only partly tracked, are left out.`:"Averages appear once you have a complete month of receipts."}</p>
-  <div class="section">${barChart(A, mk)}<span class="small muted">Bars: monthly totals. Dashed line: your average.</span></div>
+  ${paceSection(A, list, mk)}
+  <div class="section"><h2>Month by month</h2>${barChart(A, mk)}<span class="small muted chart-note">Bars: monthly totals. Dashed line: your monthly average. Includes every category, rent and bills too.</span></div>
   <div class="premium">
     <div class="premium-head"><span class="label">Price premium · ${esc(mkLabel(mk,true))}</span><span class="v num">${money(M.premium)}</span></div>
-    <span class="small muted">${A.premium ? `What you'd have saved by always paying your lowest price for products you bought more than once. All time: <b class="num">${money(A.premium)}</b>.` : "Appears once you've bought the same product at different prices."}</span>
+    <span class="small muted">${A.premium ? `What you'd have saved by always paying your lowest price for products you bought more than once. All time: <b class="num">${money(A.premium)}</b>. Left out: ${esc(CAT.housing)}, and products you bought only once.` : "Appears once you've bought the same product at different prices."}</span>
   </div>
   <div class="section">
     <div class="section-head"><h2>Spending per category</h2></div>
     ${cats.length ? `<div class="ledger">${rowsHtml}</div>` : `<div class="empty">No expenses in ${mkLabel(mk,true)} yet.</div>`}
   </div>
   ${prods.length ? `<div class="section top-prods"><div class="section-head"><h2>Top products</h2><button class="linkbtn" data-nav="products">All products</button></div>
-    <table class="mini"><tbody>${prods.map(([k,v])=>`<tr><td style="text-transform:capitalize">${esc(A.products[k]?.label||k)}</td><td>${money(v)}</td></tr>`).join("")}</table></div>`:""}
+    <table class="mini"><tbody>${prods.map(([k,v])=>`<tr><td style="text-transform:capitalize">${esc(A.products[k]?.label||k)}</td><td>${money(v)}</td></tr>`).join("")}</tbody></table></div>`:""}
   ${decompSection(A, list, mk)}`;
 }
 
@@ -332,6 +395,7 @@ function viewProducts(A){
   const stapleKeys = new Set(A.staples.map(P=>P.key));
   return `
   <div class="section"><h1>Products</h1><span class="muted small hint">Tap a product to see its price history, where it's cheapest and how often you buy it.</span></div>
+  ${q ? "" : paretoSection(A)}
   ${A.staples.length && !q ? `<div class="section"><div class="section-head"><h2>Your staples</h2><span class="small muted">bought in ≥ half of your months</span></div>
     <div class="ledger">${A.staples.slice(0,12).map(productRow).join("")}</div></div>`:""}
   <div class="section"><div class="section-head"><h2>${q?"Results":"Everything else"}</h2></div>
@@ -351,10 +415,10 @@ function viewInflation(A){
   const cats = [...new Set(Object.values(A.products).filter(P=>P.monthsBought>=2 && !NO_INDEX.has(P.category)).map(P=>P.category))]
     .map(c => { const ci = priceIndex(A, c); const p = ci.pts; return [c, p[p.length-1].v/p[0].v - 1, ci.count]; }).sort((a,b)=>b[1]-a[1]);
   return `
-  <div class="section"><h1>Your inflation</h1><span class="muted small">How much the prices of the things <i>you</i> actually buy have changed. Rent, bills, restaurants and clothes are left out because their prices can't be compared like for like.</span></div>
+  <div class="section"><h1>Your inflation</h1><span class="muted small">How much the prices of the things <i>you</i> actually buy have changed. Some categories are left out because their prices can't be compared like for like (see the note under the chart).</span></div>
   <div class="hero"><span class="label">${span>=12?"Last 12 months":`Since ${mkLabel(ref.mk,true)} (${span} mo)`}</span><span class="big num">${pct(ch)}</span>
     ${span<12?`<span class="pill ${annual>0?"up":"down"}">≈ ${pct(annual)} per year at this pace</span>`:""}</div>
-  <div class="section"><span class="label">Price index, ${mkLabel(pts[0].mk)} = 100</span>${lineChart(pts.map(p=>({...p})), {base:100, label:"Personal price index"})}</div>
+  <div class="section"><span class="label">Price index, ${mkLabel(pts[0].mk)} = 100</span>${lineChart(pts.map(p=>({...p})), {base:100, label:"Personal price index"})}<span class="small muted chart-note">Left out: ${esc(catList([...NO_INDEX]))}. Only products bought in at least two different months count. Dashed line: 100, your starting level.</span></div>
   <div class="section"><h2>Biggest price rises</h2><div class="ledger">${up.map(productRow).join("") || `<div class="empty">No price rises yet.</div>`}</div></div>
   ${down.length?`<div class="section"><h2>Got cheaper</h2><div class="ledger">${down.map(productRow).join("")}</div></div>`:""}
   <div class="section"><h2>By category</h2><table class="mini"><thead><tr><th>Category</th><th>Products</th><th>Change</th></tr></thead><tbody>
@@ -429,7 +493,7 @@ function sheetProduct(k){
       <div class="stat"><span class="label">Range</span><span class="v num" style="font-size:.95rem">${money(P.minUnit)}–${money(P.maxUnit)}</span></div>
       <div class="stat"><span class="label">Change</span><span class="v num chg ${P.change==null?"flat":chgClass(P.change)}">${P.change==null?"—":pct(P.change)}</span></div>
     </div>
-    ${pts.length>1?`<div class="section"><span class="label">Price per ${unit}, each purchase</span>${lineChart(pts,{fmt:v=>money(v), label:"Price history"})}</div>`:""}
+    ${pts.length>1?`<div class="section"><span class="label">Price per ${unit}, each purchase</span>${lineChart(pts,{fmt:v=>money(v), label:"Price history"})}<span class="small muted chart-note">Each point is one purchase, as price per ${unit}. Nothing is left out.</span></div>`:""}
     <div class="card small" style="display:flex;flex-direction:column;gap:6px">${notes.map(n=>`<span>${esc(n)}</span>`).join("")}</div>
     ${P.stores.length?`<table class="mini"><thead><tr><th>Shop</th><th>Bought</th><th>Avg / ${unit}</th></tr></thead><tbody>${P.stores.map(([s,p,n])=>`<tr><td>${esc(s)}</td><td class="muted">${n}×</td><td>${money(p)}</td></tr>`).join("")}</tbody></table>`:""}`);
 }
@@ -724,6 +788,7 @@ document.addEventListener("click", e => {
   else if (a === "save") saveDraft();
   else if (a === "delete") deleteDraft();
   else if (a === "export") exportCsv();
+  else if (a === "togglefixed"){ S.withFixed = !S.withFixed; render(); }
   else if (a === "signout"){ closeSheet(); sb.auth.signOut(); }
   else if (a === "delaccount") deleteAccount();
 });

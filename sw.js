@@ -1,7 +1,7 @@
 
 // Paragon service worker: makes the app installable and lets it open without a connection.
 // Bump VERSION whenever you publish changes so phones pick up the new files.
-const VERSION = "paragon-v6";
+const VERSION = "paragon-v7";
 const SHELL = ["./", "index.html", "styles.css", "app.js", "config.js", "manifest.webmanifest",
   "vendor/supabase-2.118.0.js", "icons/icon-192.png", "icons/icon-512.png", "icons/logo.svg"];
  

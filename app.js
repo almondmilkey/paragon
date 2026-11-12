@@ -18,7 +18,7 @@ const LS_R = "paragon.receipts.v1", LS_P = "paragon.profile.v1";
  
 /* ---------- state ---------- */
 const S = {
-  view: "home", month: null, openCat: null, q: "", withFixed: false,
+  view: "home", month: null, openCat: null, q: "", withFixed: false, rules: [],
   real: [], loaded: false, currency: "EUR", aliases: {},
   user: null, draft: null, scanCtl: null, used: null, limit: null
 };
@@ -432,10 +432,14 @@ function viewHistory(A, list){
   return `
   <div class="section"><div class="section-head"><h1>Receipts</h1><button class="btn ghost" data-action="manual" style="padding:8px 14px;font-size:.9rem">+ Add expense</button></div>
   <span class="muted small">Tap a receipt to correct products, prices or categories.</span></div>
+  ${!isDemo() && S.rules.length ? `<div class="section repeats"><div class="section-head"><h2>Monthly repeats</h2><span class="num muted">${money(sum(S.rules.map(ruleTotal)))} / month</span></div>
+    <div class="ledger">${S.rules.map(R => `<div class="rule-row"><span class="st">${esc(R.store || R.items[0]?.product || "Expense")}</span><span class="num">${money(ruleTotal(R))}</span>
+      <span class="meta">Every month on ${dayText(R.day)} · ${esc(untilText(R))}</span><button class="linkbtn" data-action="stoprule" data-rule="${esc(R.id)}">Stop</button></div>`).join("")}</div>
+    <p class="small muted chart-note">Added automatically when the day arrives. To change the amount from now on, open the latest one below and tick “Use these details for future months”. Stopping keeps the months already added.</p></div>` : ""}
   ${mks.map(mk => `<div class="section"><div class="section-head"><h2>${mkLabel(mk,true)}</h2><span class="num muted">${money(A.months[mk]?.total||0)}</span></div>
     <div class="ledger">${byM[mk].sort((a,b)=>b.date.localeCompare(a.date)).map(r=>`<button class="receipt" data-receipt="${esc(r.id)}">
       <span class="st">${esc(r.store||"Expense")}</span><span class="num" style="font-family:var(--display)">${money(receiptTotal(r))}</span>
-      <span class="meta">${fmtDate(r.date)} · ${(r.items||[]).length} item${(r.items||[]).length===1?"":"s"} <span class="tag ${r.source==="manual"?"manual":"scan"}">${r.source==="manual"?"manual":"scanned"}</span></span></button>`).join("")}</div></div>`).join("") || `<div class="empty">No receipts yet. Tap the button below to scan one.</div>`}`;
+      <span class="meta">${fmtDate(r.date)} · ${(r.items||[]).length} item${(r.items||[]).length===1?"":"s"} <span class="tag ${r.source==="manual"?"manual":"scan"}">${r.source==="manual"?"manual":"scanned"}</span>${r.recurringId?`<span class="tag repeat-tag">monthly</span>`:""}</span></button>`).join("")}</div></div>`).join("") || `<div class="empty">No receipts yet. Tap the button below to scan one.</div>`}`;
 }
  
 /* ---------- sheets ---------- */
@@ -500,7 +504,8 @@ function sheetProduct(k){
  
 /* ---------- editor ---------- */
 function blankItem(){ return {name:"", product:"", category:"other", qty:1, unit:"pcs", unitPrice:0, price:0}; }
-function startEditor(draft){ S.draft = draft; renderEditor(); }
+function startEditor(draft){ S.draft = draft; if (draft.recurringId){ const R = S.rules.find(x => x.id === draft.recurringId); if (R) draft.until = R.until || ""; } renderEditor(); }
+function renderEditorKeep(){ const sc = document.querySelector(".sheet")?.scrollTop || 0; renderEditor(); const sh = document.querySelector(".sheet"); if (sh) sh.scrollTop = sc; }
 function renderEditor(){
   const D = S.draft; const total = r2(sum(D.items.map(i=>num(i.price))));
   const mismatch = D.printedTotal && Math.abs(D.printedTotal - total) > .02;
@@ -522,14 +527,33 @@ function renderEditor(){
         <select data-i="${i}" data-f="unit" aria-label="Unit"><option value="pcs" ${it.unit==="pcs"?"selected":""}>pcs</option><option value="kg" ${it.unit==="kg"?"selected":""}>kg</option><option value="l" ${it.unit==="l"?"selected":""}>litre</option></select>
       </div></div>`).join("")}</div>
     <button class="btn ghost" data-action="additem">+ Add line</button>
+    ${D.source === "manual" && !D.demo ? repeatBlock(D) : ""}
     <div class="totals"><span>Total</span><span class="num" id="f-total">${money(total)}</span></div>
     <div id="f-warn">${mismatch?`<div class="warn">The receipt says ${money(D.printedTotal)}, the lines add up to ${money(total)}. A line may be missing or misread.</div>`:""}</div>
     <div class="actions"><button class="btn" data-action="save" ${D.demo?"disabled":""}>Save</button>
       ${!isNew&&!D.demo?`<button class="btn danger" data-action="delete" id="delBtn">Delete</button>`:""}</div>`);
 }
+function repeatBlock(D){
+  const R = D.recurringId && S.rules.find(x => x.id === D.recurringId);
+  const d = dayOf(D.date || todayISO());
+  const untilCtl = `<div class="until" role="radiogroup" aria-label="Repeat until">
+      <label><input type="radio" name="f-untilmode" value="none" ${D.until ? "" : "checked"}> No end date</label>
+      <label><input type="radio" name="f-untilmode" value="date" ${D.until ? "checked" : ""}> Until <input type="date" id="f-until" value="${esc(D.until || "")}" ${D.until ? "" : "disabled"} aria-label="Last date"></label></div>`;
+  if (R) return `<div class="repeat card small"><span><b>Repeats monthly</b> on ${dayText(R.day)}, ${esc(untilText(R))}.</span>
+      ${untilCtl}
+      <label class="check"><input type="checkbox" id="f-future" ${D.applyFuture ? "checked" : ""}> Use these details (payee, amounts, day) for future months</label>
+      <span class="muted">Changes without this tick only affect this month. Months already added stay as they are.</span>
+      <button class="linkbtn" data-action="stoprule" id="stopRuleBtn">Stop repeating</button></div>`;
+  return `<div class="repeat card small"><label class="check"><input type="checkbox" id="f-repeat" ${D.repeat ? "checked" : ""}> <b>Repeat monthly</b></label>
+    ${D.repeat ? `<span>Added automatically every month on ${dayText(d)}, starting ${esc(mkLabel(mkOf(D.date || todayISO()), true))}. Past months up to today are added too.</span>${untilCtl}` : `<span class="muted">For rent, subscriptions and other fixed costs.</span>`}</div>`;
+}
 function onEditorInput(e){
   const el = e.target; const D = S.draft; if (!D) return;
-  if (el.id === "f-store") D.store = el.value; else if (el.id === "f-date") D.date = el.value;
+  if (el.id === "f-repeat"){ D.repeat = el.checked; renderEditorKeep(); return; }
+  if (el.id === "f-future"){ D.applyFuture = el.checked; return; }
+  if (el.name === "f-untilmode"){ const on = el.value === "date"; const u = $("#f-until"); if (u){ u.disabled = !on; if (on) u.focus(); } D.until = on ? (u?.value || "") : ""; return; }
+  if (el.id === "f-until"){ D.until = el.value; return; }
+  if (el.id === "f-store") D.store = el.value; else if (el.id === "f-date"){ D.date = el.value; if (D.repeat) renderEditorKeep(); }
   else if (el.dataset.f){ const it = D.items[+el.dataset.i]; const f = el.dataset.f;
     it[f] = el.value;
     if (f === "price" || f === "qty"){ const q = num(it.qty)||1; it.unitPrice = r2(num(it.price)/q); }
@@ -545,17 +569,29 @@ async function saveDraft(){
     .filter(it => it.product || it.price);
   if (!items.length){ toast("Add at least one line with a price."); return; }
   if (!D.date){ toast("Pick a date."); return; }
-  const rec = {id: D.id || rid(), date: D.date, store: String(D.store||"").trim(), items, source: D.source, createdAt: D.createdAt || new Date().toISOString()};
+  const repeating = D.repeat || D.recurringId;
+  if (repeating && $('[name="f-untilmode"][value="date"]')?.checked && !D.until){ toast("Pick an end date, or choose “No end date”."); return; }
+  if (repeating && D.until && D.until < D.date){ toast("The end date is before the first date."); return; }
+  const rec = {id: D.id || rid(), date: D.date, store: String(D.store||"").trim(), items, source: D.source, createdAt: D.createdAt || new Date().toISOString(), recurringId: D.recurringId || null};
   if (D.printedTotal) rec.printedTotal = D.printedTotal;
   // learn corrections from scans
   let learned = false;
   if (D.original) items.forEach((it,i) => { const o = D.original[i]; if (o && it.name && (key(o.product)!==key(it.product) || o.category!==it.category)){ S.aliases[key(it.name)] = {product:it.product, category:it.category}; learned = true; } });
   const btn = document.querySelector('[data-action="save"]'); if (btn){ btn.disabled = true; btn.textContent = "Saving…"; }
   try {
+    let newRule = null;
+    if (D.repeat && !D.recurringId){
+      newRule = {id: rid(), store: rec.store, items, day: dayOf(rec.date), startMonth: mkOf(rec.date), until: D.until || null, lastGenerated: mkOf(rec.date)};
+      await saveRule(newRule); rec.recurringId = newRule.id;
+    } else if (D.recurringId){
+      const R = S.rules.find(x => x.id === D.recurringId);
+      if (R){ const upd = {...R, until: D.until || null}; if (D.applyFuture) Object.assign(upd, {store: rec.store, items, day: dayOf(rec.date)}); await saveRule(upd); }
+    }
     await persistReceipt(rec);
+    if (newRule || D.recurringId) await generateRecurring();
     if (learned) await persistProfile();
     S.month = mkOf(rec.date);
-    closeSheet(); render(); toast(learned ? "Saved. Corrections remembered for next time." : "Saved");
+    closeSheet(); render(); toast(learned ? "Saved. Corrections remembered for next time." : (D.repeat && !D.recurringId) ? "Saved. It will repeat every month." : "Saved");
   } catch(e){ if (btn){ btn.disabled = false; btn.textContent = "Save"; } toast("Couldn't save. Check your connection and try again."); }
 }
 async function deleteDraft(){
@@ -572,16 +608,21 @@ const SB_URL = String(CFG.supabaseUrl || "").trim().replace(/\/+$/, "").replace(
 let sb = null;
 try { if (configured) sb = window.supabase.createClient(SB_URL, String(CFG.supabaseKey).trim()); } catch(e){ console.error(e); }
 const thisMonth = () => new Date().toISOString().slice(0,7);
-const fromRow = r => ({id:r.id, date:r.date, store:r.store||"", items:r.items||[], source:r.source, printedTotal: r.printed_total==null ? null : Number(r.printed_total), createdAt:r.created_at});
+const fromRow = r => ({id:r.id, date:r.date, store:r.store||"", items:r.items||[], source:r.source, printedTotal: r.printed_total==null ? null : Number(r.printed_total), createdAt:r.created_at, recurringId:r.recurring_id || null});
+const ruleFromRow = r => ({id:r.id, store:r.store||"", items:r.items||[], day:r.day, startMonth:r.start_month, until:r.until || null, lastGenerated:r.last_generated});
  
 async function loadData(){
   S.loaded = false; render();
-  const [rec, prof] = await Promise.all([
+  const [rec, prof, rul] = await Promise.all([
     sb.from("receipts").select("*").order("date", {ascending:true}),
-    sb.from("profiles").select("*").maybeSingle()
+    sb.from("profiles").select("*").maybeSingle(),
+    sb.from("recurring").select("*")
   ]);
   if (rec.error){ toast("Couldn't load your receipts. Check your connection."); console.error(rec.error); }
   S.real = (rec.data || []).map(fromRow);
+  S.rules = (rul.data || []).map(ruleFromRow);
+  if (rul.error) console.error(rul.error);
+  try { await generateRecurring(); } catch(e){ console.error("repeats", e); }
   if (prof.data){ S.currency = prof.data.currency || "EUR"; S.aliases = prof.data.aliases || {}; fmtCache = {}; }
   S.loaded = true; render();
   refreshUsage();
@@ -599,7 +640,7 @@ async function refreshUsage(){
   S.used = data ? data.count : 0;
 }
 async function persistReceipt(rec){
-  const row = {id:rec.id, date:rec.date, store:rec.store, items:rec.items, source:rec.source, printed_total: rec.printedTotal ?? null, updated_at:new Date().toISOString()};
+  const row = {id:rec.id, date:rec.date, store:rec.store, items:rec.items, source:rec.source, printed_total: rec.printedTotal ?? null, recurring_id: rec.recurringId || null, updated_at:new Date().toISOString()};
   const {error} = await sb.from("receipts").upsert(row);
   if (error) throw error;
   const i = S.real.findIndex(r=>r.id===rec.id); if (i>=0) S.real[i] = rec; else S.real.push(rec);
@@ -610,6 +651,49 @@ async function removeReceipt(id){
   if (error) throw error;
   S.real = S.real.filter(r=>r.id!==id);
 }
+/* ---------- monthly repeats ---------- */
+const dayOf = iso => +String(iso).slice(8,10) || 1;
+const dateIn = (mk, day) => `${mk}-${pad(Math.min(day, daysIn(mk)))}`;
+const ruleTotal = R => r2(sum((R.items||[]).map(i => num(i.price))));
+// Same repeat + same month always gives the same id, so two devices can't add a month twice.
+async function seriesId(ruleId, mk){
+  const h = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(ruleId + "|" + mk)));
+  h[6] = (h[6] & 0x0f) | 0x40; h[8] = (h[8] & 0x3f) | 0x80;
+  const x = [...h.slice(0,16)].map(v => v.toString(16).padStart(2,"0")).join("");
+  return `${x.slice(0,8)}-${x.slice(8,12)}-${x.slice(12,16)}-${x.slice(16,20)}-${x.slice(20,32)}`;
+}
+// Adds every month whose date has arrived since the repeat last ran. A month you deleted is not added again.
+async function generateRecurring(){
+  const today = todayISO(), nowMk = mkOf(today);
+  for (const R of S.rules){
+    const rows = []; let mk = R.lastGenerated;
+    while (mk < nowMk){
+      const next = addMonths(mk, 1), date = dateIn(next, R.day);
+      if (date > today || (R.until && date > R.until)) break;
+      rows.push({id: await seriesId(R.id, next), date, store: R.store, items: R.items, source: "manual", printed_total: null, recurring_id: R.id, updated_at: new Date().toISOString()});
+      mk = next;
+    }
+    if (!rows.length) continue;
+    const {error} = await sb.from("receipts").upsert(rows); if (error) throw error;
+    const up = await sb.from("recurring").update({last_generated: mk, updated_at: new Date().toISOString()}).eq("id", R.id); if (up.error) throw up.error;
+    R.lastGenerated = mk;
+    rows.forEach(r => { if (!S.real.some(x => x.id === r.id)) S.real.push(fromRow(r)); });
+  }
+  S.real.sort((a,b) => a.date.localeCompare(b.date));
+}
+async function saveRule(R){
+  const {error} = await sb.from("recurring").upsert({id:R.id, store:R.store, items:R.items, day:R.day, start_month:R.startMonth, until:R.until || null, last_generated:R.lastGenerated, updated_at:new Date().toISOString()});
+  if (error) throw error;
+  const i = S.rules.findIndex(x => x.id === R.id); if (i >= 0) S.rules[i] = R; else S.rules.push(R);
+}
+async function stopRule(id){
+  const {error} = await sb.from("recurring").delete().eq("id", id); if (error) throw error;
+  S.rules = S.rules.filter(R => R.id !== id);
+  S.real.forEach(r => { if (r.recurringId === id) r.recurringId = null; });
+}
+const untilText = R => R.until ? `until ${fmtDate(R.until)}` : "no end date";
+const dayText = d => d > 28 ? `day ${d} (or the last day of shorter months)` : `day ${d}`;
+
 async function persistProfile(){
   const {error} = await sb.from("profiles").upsert({user_id:S.user.id, currency:S.currency, aliases:S.aliases, updated_at:new Date().toISOString()});
   if (error) throw error;
@@ -789,6 +873,11 @@ document.addEventListener("click", e => {
   else if (a === "delete") deleteDraft();
   else if (a === "export") exportCsv();
   else if (a === "togglefixed"){ S.withFixed = !S.withFixed; render(); }
+  else if (a === "stoprule"){
+    const id = t.dataset.rule || S.draft?.recurringId; if (!id) return;
+    if (!t.dataset.armed){ t.dataset.armed = "1"; t.textContent = "Tap again to stop"; setTimeout(() => { if (t.isConnected){ delete t.dataset.armed; t.textContent = t.dataset.rule ? "Stop" : "Stop repeating"; } }, 3000); return; }
+    stopRule(id).then(() => { if (S.draft){ closeSheet(); } render(); toast("Stopped. Months already added stay."); }).catch(() => toast("Couldn't stop it. Try again."));
+  }
   else if (a === "signout"){ closeSheet(); sb.auth.signOut(); }
   else if (a === "delaccount") deleteAccount();
 });

@@ -205,3 +205,17 @@ table.mini.decomp tr.tot td{font-weight:600; border-bottom:0}
 .pareto-row .meter{grid-column:1 / 3}
 .pareto-row .cum{grid-column:1 / 3}
 .pareto-rest{display:flex; justify-content:space-between; gap:12px; padding:12px 2px; color:var(--muted); border-bottom:1px solid var(--line)}
+
+/* monthly repeats */
+.repeat{display:flex; flex-direction:column; gap:8px}
+.repeat .check{display:flex; gap:8px; align-items:center}
+.repeat input[type=checkbox],.repeat input[type=radio]{width:18px; height:18px; accent-color:var(--taupe)}
+.until{display:flex; flex-direction:column; gap:8px}
+.until label{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
+.until input[type=date]{font:inherit; color:var(--ink); background:var(--paper); border:1px solid var(--line); border-radius:10px; padding:7px 9px}
+.until input[type=date]:disabled{opacity:.5}
+.repeat .linkbtn{align-self:flex-start}
+.rule-row{display:grid; grid-template-columns:1fr auto; gap:2px 12px; padding:12px 2px; border-bottom:1px solid var(--line); align-items:baseline}
+.rule-row .st{font-family:var(--display); font-size:1.02rem}
+.rule-row .meta{font-size:.8rem; color:var(--muted)}
+.tag.repeat-tag{background:var(--line); color:var(--ink); margin-left:4px}

@@ -466,12 +466,15 @@ function sheetAdd(){
  
 function sheetSettings(){
   const cfg = window.PARAGON_CONFIG || {};
+  const feedbackSubject = encodeURIComponent("MijnParagon feedback");
+  const feedbackBody = encodeURIComponent("Hi MijnParagon,\n\nMy feedback:\n\n");
   openSheet(`<div class="sheet-head"><h2>Settings</h2>${closeBtn}</div>
     <div class="settings-list">
     <div class="card small"><span class="label">Signed in as</span><br><b id="setEmail"></b></div>
     <label class="field"><span class="label">Currency</span><select id="cur">${CURRENCIES.map(c=>`<option ${c===S.currency?"selected":""}>${c}</option>`).join("")}</select></label>
     <div class="card small"><b>Scans this month</b><br><span class="muted" id="usage">${S.used!=null?`${S.used}${S.limit?` of ${S.limit}`:""} used`:"Checking…"}</span></div>
     <div class="card small"><b>Learned corrections</b><br><span class="muted">${Object.keys(S.aliases).length} product name${Object.keys(S.aliases).length===1?"":"s"} remembered. When you fix a product name or category after a scan, MijnParagon applies the same fix to future receipts.</span></div>
+    <a class="btn ghost wide" style="display:block;text-align:center;text-decoration:none" href="mailto:info@mijnparagon.nl?subject=${feedbackSubject}&body=${feedbackBody}">Send feedback</a>
     <button class="btn ghost wide" data-action="export">Export my data (CSV)</button>
     <button class="btn ghost wide" data-action="signout">Sign out</button>
     <button class="btn danger wide" data-action="delaccount" id="delAccBtn">Delete my account and all data</button>

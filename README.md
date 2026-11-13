@@ -103,6 +103,7 @@ Znajomym wysyłasz po prostu link.
 - [ ] Zeskanuj paragon → popraw nazwę produktu → zapisz. Dane przykładowe znikają.
 - [ ] W **Table Editor → receipts** widać zapisany paragon, a w **scan_usage** licznik 1.
 - [ ] Dodaj wydatek ręcznie, edytuj go i usuń.
+- [ ] **Settings → Send feedback** opens the email app with `info@mijnparagon.nl` as the recipient. This uses a `mailto:` link, so no additional Supabase or SMTP setup is needed; the user's device must have an email app configured, and the user still presses Send.
 - [ ] Ustawienia → Export CSV otwiera plik.
 - [ ] „Forgot password?” → mail → nowe hasło działa.
 - [ ] Na drugim koncie nie widać danych pierwszego.

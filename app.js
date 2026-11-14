@@ -5,11 +5,12 @@
 const CATS = [
   ["bakery","Bread & bakery"],["dairy","Dairy & cheese"],["meat","Meat & fish"],["produce","Fruit & veg"],
   ["pantry","Pantry"],["snacks","Snacks & sweets"],["drinks","Drinks"],["alcohol","Alcohol & tobacco"],["household","Household"],
-  ["hygiene","Hygiene & cosmetics"],["clothes","Clothes"],["transport","Transport"],["eating_out","Eating out"],
+  ["hygiene","Hygiene & cosmetics"],["clothes_and_shoes","Clothes and shoes"],["transport","Transport"],["eating_out","Eating out"],
   ["health","Health"],["leisure","Leisure & subscriptions"],["housing","Rent & utilities"],
   ["child_care","Child care"],["pet_care","Pet care"],["telecommunications","Telecommunications"],
   ["insurance_financial","Insurance & financial services"],["education","Education"],
-  ["arts_culture","Arts & culture"],["sports_fitness","Sports & fitness"],["specialized_equipment","Specialized equipment"],["other","Other"]];
+  ["arts_culture","Arts & culture"],["sports_fitness","Sports & fitness"],["specialized_equipment","Specialized equipment"],
+  ["car_expenses","Car Expenses"],["other","Other"]];
 const CAT = Object.fromEntries(CATS);
 const CURRENCIES = ["EUR","PLN","USD","GBP","CHF"];
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -344,7 +345,7 @@ function viewHome(A, list){
     <div class="stat"><span class="label">Std deviation</span><span class="v num">${s?"± "+money(s,0):"—"}</span></div>
     <div class="stat"><span class="label">Typical range</span><span class="v num" style="font-size:.95rem;white-space:normal;line-height:1.25">${avg&&s?`${money(Math.max(0,avg-s),0)}–<br>${money(avg+s,0)}`:"—"}</span></div>
   </div>
-  <p class="small muted stats-note">${n?`Based on ${n} complete month${n===1?"":"s"}. The current month, and a first month you only partly tracked, are left out.`:"Averages appear once you have a complete month of receipts."}</p>
+  <p class="small muted stats-note">${n?`Based on ${n} complete month${n===1?"":"s"}. The current month, and a first month you only partly tracked, are left out.`:"Averages appear once you have a complete month of receipts."}<br>Standard deviation shows how much your monthly spending varies from the average, so you can tell whether a month is usual or unusual.</p>
   ${paceSection(A, list, mk)}
   <div class="section"><h2>Month by month</h2>${barChart(A, mk)}<span class="small muted chart-note">Bars: monthly totals. Dashed line: your monthly average. Includes every category, rent and bills too.</span></div>
   <div class="premium">
@@ -418,7 +419,7 @@ function viewInflation(A){
   <div class="section"><h1>Your inflation</h1><span class="muted small">How much the prices of the things <i>you</i> actually buy have changed. Some categories are left out because their prices can't be compared like for like (see the note under the chart).</span></div>
   <div class="hero"><span class="label">${span>=12?"Last 12 months":`Since ${mkLabel(ref.mk,true)} (${span} mo)`}</span><span class="big num">${pct(ch)}</span>
     ${span<12?`<span class="pill ${annual>0?"up":"down"}">≈ ${pct(annual)} per year at this pace</span>`:""}</div>
-  <div class="section"><span class="label">Price index, ${mkLabel(pts[0].mk)} = 100</span>${lineChart(pts.map(p=>({...p})), {base:100, label:"Personal price index"})}<span class="small muted chart-note">Left out: ${esc(catList([...NO_INDEX]))}. Only products bought in at least two different months count. Dashed line: 100, your starting level.</span></div>
+  <div class="section"><span class="label">Price index, ${mkLabel(pts[0].mk)} = 100</span>${lineChart(pts.map(p=>({...p})), {base:100, label:"Personal price index"})}<span class="small muted chart-note">Left out: ${esc(catList([...NO_INDEX]))}. Only products bought in at least two different months count. Dashed line: 100, your starting level.</span><p class="small muted chart-note">This index reflects the prices you actually paid, including promotions and where you shopped. For a month-to-month breakdown of price changes for the same product at the same shop, see <button class="linkbtn" data-nav="home">“Why your spending changed” on Home</button>.</p></div>
   <div class="section"><h2>Biggest price rises</h2><div class="ledger">${up.map(productRow).join("") || `<div class="empty">No price rises yet.</div>`}</div></div>
   ${down.length?`<div class="section"><h2>Got cheaper</h2><div class="ledger">${down.map(productRow).join("")}</div></div>`:""}
   <div class="section"><h2>By category</h2><table class="mini"><thead><tr><th>Category</th><th>Products</th><th>Change</th></tr></thead><tbody>

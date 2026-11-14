@@ -14,9 +14,9 @@ const json = (body: unknown, status = 200) =>
 
 const CATEGORIES = [
   "bakery", "dairy", "meat", "produce", "pantry", "snacks", "drinks", "alcohol", "household",
-  "hygiene", "clothes", "transport", "eating_out", "health", "leisure", "housing", "child_care",
+  "hygiene", "clothes_and_shoes", "transport", "eating_out", "health", "leisure", "housing", "child_care",
   "pet_care", "telecommunications", "insurance_financial", "education", "arts_culture",
-  "sports_fitness", "specialized_equipment", "other",
+  "sports_fitness", "specialized_equipment", "car_expenses", "other",
 ];
 
 const PROMPT = `The image is a photo of a shopping receipt (any country or language). Extract its contents.

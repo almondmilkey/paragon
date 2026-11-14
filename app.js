@@ -45,7 +45,13 @@ const pct = (v, dec=1) => (v>0?"+":"") + (v*100).toFixed(dec) + "%";
 const chgClass = v => Math.abs(v) < 0.005 ? "flat" : v > 0 ? "up" : "down";
 const fmtDate = iso => { if(!iso) return ""; const [y,m,d] = iso.split("-"); return `${+d} ${MONTHS[+m-1]} ${y}`; };
 const rid = () => (crypto.randomUUID ? crypto.randomUUID() : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)));
-const receiptTotal = r => r2(sum((r.items||[]).map(i => num(i.price))));
+// total of a receipt, a repeat rule or the draft in the editor
+const itemsTotal = r => r2(sum((r.items||[]).map(i => num(i.price))));
+const dayOf = iso => +String(iso).slice(8,10) || 1;
+const daysIn = mk => { const [y,m] = mk.split("-").map(Number); return new Date(y, m, 0).getDate(); };
+const catOf = c => CAT[c] ? c : "other";
+const byDate = (a,b) => a.date.localeCompare(b.date);
+const plural = n => n===1 ? "" : "s";
 function toast(msg){ const t = document.createElement("div"); t.className="toast"; t.textContent=msg; $("#toastRoot").replaceChildren(t); setTimeout(()=>t.remove(), 2600); }
  
 /* ---------- example data (deterministic) ---------- */
@@ -67,8 +73,8 @@ function makeDemo(){
   const drift = {coffee:.012, butter:-.006, "olive oil":.009, cheese:.006, eggs:.005, chocolate:.01};
   const out = []; const now = new Date(); const curMk = mkOf(todayISO());
   for (let k = 7; k >= 0; k--){
-    const mk = addMonths(curMk, -k); const [y,m] = mk.split("-").map(Number);
-    const days = new Date(y, m, 0).getDate(); const lastDay = k===0 ? now.getDate() : days;
+    const mk = addMonths(curMk, -k);
+    const lastDay = k===0 ? now.getDate() : daysIn(mk);
     const trips = k===0 ? 2 : 6 + Math.floor(rnd()*3);
     for (let t = 0; t < trips; t++){
       const d = Math.max(1, Math.min(lastDay, Math.round((t+.5)*lastDay/trips)));
@@ -90,9 +96,9 @@ function makeDemo(){
     man(3, "Monthly transit pass", "transit pass", "transport", 63);
     man(15, "Vattenfall", "electricity & heating", "housing", r2(92 + rnd()*22));
     for (let e = 0; e < 2 + Math.floor(rnd()*3); e++) man(5+e*6, ["Café Liebling","Pho Hanoi","Pizzeria Due"][e%3], "restaurant", "eating_out", r2(14 + rnd()*30));
-    if (rnd() < .4) man(20, "Uniqlo", "clothing", "clothes", r2(29 + rnd()*60));
+    if (rnd() < .4) man(20, "Uniqlo", "clothing", "clothes_and_shoes", r2(29 + rnd()*60));
   }
-  return out.sort((a,b)=>a.date.localeCompare(b.date));
+  return out.sort(byDate);
 }
 const DEMO = makeDemo();
 const receipts = () => S.real.length ? S.real : (S.loaded ? DEMO : []);
@@ -104,9 +110,9 @@ function analyze(list){
   for (const r of list){
     const mk = mkOf(r.date); if (!mk) continue;
     const M = months[mk] ||= {total:0, cats:{}, prods:{}, count:0, minDay:31, premium:0, premCats:{}, premProds:{}};
-    M.count++; M.minDay = Math.min(M.minDay, +String(r.date).slice(8,10) || 1);
+    M.count++; M.minDay = Math.min(M.minDay, dayOf(r.date));
     for (const it of r.items || []){
-      const price = num(it.price); const cat = CAT[it.category] ? it.category : "other";
+      const price = num(it.price); const cat = catOf(it.category);
       M.total += price; M.cats[cat] = (M.cats[cat]||0) + price;
       const pk = key(it.product || it.name); if (!pk) continue;
       M.prods[pk] = (M.prods[pk]||0) + price;
@@ -119,10 +125,11 @@ function analyze(list){
   const mks = Object.keys(months).sort();
   const curMk = mkOf(todayISO());
   // leave out the running month, and a first month that was only partly tracked
-  const complete = mks.filter(m => m < curMk && !(m === mks[0] && months[m].minDay > 5)).map(m => months[m].total);
+  const completeMks = mks.filter(m => m < curMk && !(m === mks[0] && months[m].minDay > 5));
+  const complete = completeMks.map(m => months[m].total);
   const stats = {avg: mean(complete), sd: sd(complete), n: complete.length};
   for (const P of Object.values(products)){
-    P.buys.sort((a,b)=>a.date.localeCompare(b.date));
+    P.buys.sort(byDate);
     const ups = P.buys.map(b=>b.unitPrice);
     P.avgUnit = mean(ups); P.minUnit = Math.min(...ups); P.maxUnit = Math.max(...ups); P.sdUnit = sd(ups);
     P.unit = P.buys[P.buys.length-1].unit;
@@ -153,11 +160,13 @@ function analyze(list){
   }
   const staples = Object.values(products).filter(P => P.category !== "housing" && mks.length >= 2 && P.monthsBought >= 2 && P.share >= .5)
     .sort((a,b)=> b.share - a.share || b.total - a.total);
-  return {months, mks, stats, products, staples, curMk, premium};
+  return {months, mks, completeMks, stats, products, staples, curMk, premium};
 }
+// every month you can step through on Home: all months with receipts, plus the running one
+const monthList = A => A.mks.includes(A.curMk) ? A.mks : [...A.mks, A.curMk];
  
 /* spend-weighted personal price index: each product against its own starting price */
-const NO_INDEX = new Set(["housing","eating_out","clothes","leisure","health","transport"]);
+const NO_INDEX = new Set(["housing","eating_out","clothes_and_shoes","leisure","health","transport"]);
 function priceIndex(A, filterCat){
   const elig = Object.values(A.products).filter(P => P.monthsBought >= 2 && !NO_INDEX.has(P.category) && (!filterCat || P.category === filterCat));
   elig.forEach(P => { const ms = Object.keys(P.monthly).sort().slice(0,2); P.base = mean(ms.map(m=>P.monthly[m])); });
@@ -182,7 +191,7 @@ function decompose(list, mk, curMk){
   const per = [{}, {}], tot = [0, 0];
   for (const r of list){
     const m = mkOf(r.date), t = m === prevMk ? 0 : m === mk ? 1 : -1; if (t < 0) continue;
-    if ((+String(r.date).slice(8,10) || 1) > cut) continue;
+    if (dayOf(r.date) > cut) continue;
     const st = key(r.store);
     for (const it of r.items || []){
       const price = num(it.price); tot[t] += price;
@@ -211,12 +220,15 @@ function decompose(list, mk, curMk){
 
 /* ---------- charts ---------- */
 function niceMax(v){ if (v <= 0) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))); const n = v/p; return (n<=1?1:n<=2?2:n<=2.5?2.5:n<=5?5:10)*p; }
+const gridRow = (yy, label, L, x2) => `<line class="grid" x1="${L}" x2="${x2}" y1="${yy}" y2="${yy}"/><text x="${L-6}" y="${yy+3}" text-anchor="end">${esc(label)}</text>`;
+const moneyGrid = (max, y, L, x2) => [0,.5,1].map(f => gridRow(y(max*f), money(max*f,0), L, x2)).join("");
+const areaLine = (d, xEnd, L, yBase) => `<path class="area" d="${d}L${xEnd},${yBase}L${L},${yBase}Z"/><path class="line" d="${d}"/>`;
+const endDot = (x, y, label) => `<circle class="dot" cx="${x}" cy="${y}" r="3.5"/><text class="end" x="${x+6}" y="${y+3}">${esc(label)}</text>`;
 function barChart(A, sel){
   const mks = A.mks.slice(-12); if (!mks.length) return "";
   const W=340,H=160,L=40,B=20,T=10,R=6; const vals = mks.map(m=>A.months[m].total);
   const max = niceMax(Math.max(...vals, A.stats.avg||0)); const y = v => T + (H-T-B)*(1 - v/max);
-  const bw = (W-L-R)/mks.length; let g = "";
-  [0,.5,1].forEach(f => { const yy = y(max*f); g += `<line class="grid" x1="${L}" x2="${W-R}" y1="${yy}" y2="${yy}"/><text x="${L-6}" y="${yy+3}" text-anchor="end">${esc(money(max*f,0))}</text>`; });
+  const bw = (W-L-R)/mks.length; let g = moneyGrid(max, y, L, W-R);
   mks.forEach((m,i) => { const x = L + i*bw + bw*.18, h = (H-T-B) - (y(vals[i])-T);
     g += `<rect class="bar${m===sel?" sel":""}" x="${x}" y="${y(vals[i])}" width="${bw*.64}" height="${Math.max(0,h)}" rx="2"/>`;
     g += `<text x="${x+bw*.32}" y="${H-6}" text-anchor="middle">${mkShort(m)}</text>`; });
@@ -231,17 +243,19 @@ function lineChart(pts, opts={}){
   const x = i => L + i*(W-L-R)/(pts.length-1), y = v => T + (H-T-B)*(1-(v-lo)/(hi-lo));
   const f = opts.fmt || (v => v.toFixed(1));
   let g = "";
-  [lo+padv, (lo+hi)/2, hi-padv].forEach(v => { g += `<line class="grid" x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L-6}" y="${y(v)+3}" text-anchor="end">${esc(f(v))}</text>`; });
+  [lo+padv, (lo+hi)/2, hi-padv].forEach(v => { g += gridRow(y(v), f(v), L, W-R); });
   if (opts.base != null) g += `<line class="base" x1="${L}" x2="${W-R}" y1="${y(opts.base)}" y2="${y(opts.base)}"/>`;
+  const li = pts.length-1;
   const d = pts.map((p,i)=>`${i?"L":"M"}${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join("");
-  g += `<path class="area" d="${d}L${x(pts.length-1)},${H-B}L${L},${H-B}Z"/><path class="line" d="${d}"/>`;
+  g += areaLine(d, x(li), L, H-B);
   const step = Math.ceil(pts.length/7);
-  pts.forEach((p,i) => { if (i%step===0 || i===pts.length-1) g += `<text x="${x(i)}" y="${H-5}" text-anchor="middle">${esc(p.label || mkShort(p.mk))}</text>`; });
-  const li = pts.length-1; g += `<circle class="dot" cx="${x(li)}" cy="${y(pts[li].v)}" r="3.5"/><text class="end" x="${x(li)+6}" y="${y(pts[li].v)+3}">${esc(f(pts[li].v))}</text>`;
+  pts.forEach((p,i) => { if (i%step===0 || i===li) g += `<text x="${x(i)}" y="${H-5}" text-anchor="middle">${esc(p.label || mkShort(p.mk))}</text>`; });
+  g += endDot(x(li), y(pts[li].v), f(pts[li].v));
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(opts.label||"Trend")}">${g}</svg>`;
 }
  
 /* ---------- views ---------- */
+const VIEWS = {home:viewHome, products:viewProducts, inflation:viewInflation, history:viewHistory};
 function render(){
   const list = receipts(); const A = analyze(list);
   if (!S.month || (!A.months[S.month] && S.month !== A.curMk)) S.month = A.months[A.curMk] ? A.curMk : (A.mks[A.mks.length-1] || A.curMk);
@@ -249,8 +263,7 @@ function render(){
   $("#banner").innerHTML = isDemo()
     ? `<div class="banner"><span>●</span><span><b>Example data.</b> You're looking at 8 made-up months so you can see how MijnParagon works. Scan or add your first receipt and only your own data will show.</span></div>` : "";
   if (!S.loaded){ $("#view").innerHTML = `<div class="empty">Loading your receipts…</div>`; return; }
-  const v = {home:viewHome, products:viewProducts, inflation:viewInflation, history:viewHistory}[S.view] || viewHome;
-  $("#view").innerHTML = v(A, list);
+  $("#view").innerHTML = (VIEWS[S.view] || viewHome)(A, list);
   const qi = $("#q"); if (qi && S._focusQ){ qi.focus(); qi.setSelectionRange(qi.value.length, qi.value.length); }
 }
  
@@ -258,14 +271,13 @@ function render(){
 const FIXED_COSTS = ["housing","insurance_financial","telecommunications"];
 const PARETO_OUT = ["housing","insurance_financial","telecommunications","transport","education","child_care","eating_out"];
 const catList = ids => ids.map(c => CAT[c]).join(", ");
-const daysIn = mk => { const [y,m] = mk.split("-").map(Number); return new Date(y, m, 0).getDate(); };
 // a[d] = money spent from the 1st up to and including day d (stays flat after the month ends)
 function cumDays(list, mk, withFixed){
   const n = daysIn(mk), a = Array(32).fill(0);
   for (const r of list){
     if (mkOf(r.date) !== mk) continue;
-    const d = Math.min(n, +String(r.date).slice(8,10) || 1);
-    for (const it of r.items || []){ const c = CAT[it.category] ? it.category : "other"; if (!withFixed && FIXED_COSTS.includes(c)) continue; a[d] += num(it.price); }
+    const d = Math.min(n, dayOf(r.date));
+    for (const it of r.items || []){ if (!withFixed && FIXED_COSTS.includes(catOf(it.category))) continue; a[d] += num(it.price); }
   }
   for (let d = 1; d <= 31; d++) a[d] += a[d-1];
   return a;
@@ -274,29 +286,29 @@ function paceChart(mk, cur, avg, lastDay){
   const W=340,H=170,L=40,B=20,T=14,R=48, n = daysIn(mk);
   const max = niceMax(Math.max(cur[lastDay], avg ? avg[n] : 0, 1));
   const x = d => L + (d-1)*(W-L-R)/(n-1), y = v => T + (H-T-B)*(1 - v/max);
-  let g = "";
-  [0,.5,1].forEach(f => { const yy = y(max*f); g += `<line class="grid" x1="${L}" x2="${W-R}" y1="${yy}" y2="${yy}"/><text x="${L-6}" y="${yy+3}" text-anchor="end">${esc(money(max*f,0))}</text>`; });
+  let g = moneyGrid(max, y, L, W-R);
   if (avg){ let d = ""; for (let i = 1; i <= n; i++) d += `${i>1?"L":"M"}${x(i).toFixed(1)},${y(avg[i]).toFixed(1)}`; g += `<path class="avg" d="${d}"/>`; }
   let d = ""; for (let i = 1; i <= lastDay; i++) d += `${i>1?"L":"M"}${x(i).toFixed(1)},${y(cur[i]).toFixed(1)}`;
-  if (lastDay > 1) g += `<path class="area" d="${d}L${x(lastDay)},${H-B}L${L},${H-B}Z"/><path class="line" d="${d}"/>`;
+  if (lastDay > 1) g += areaLine(d, x(lastDay), L, H-B);
   [1,8,15,22,n].forEach(i => { g += `<text x="${x(i)}" y="${H-5}" text-anchor="middle">${i}</text>`; });
-  g += `<circle class="dot" cx="${x(lastDay)}" cy="${y(cur[lastDay])}" r="3.5"/><text class="end" x="${x(lastDay)+6}" y="${y(cur[lastDay])+3}">${esc(money(cur[lastDay],0))}</text>`;
+  g += endDot(x(lastDay), y(cur[lastDay]), money(cur[lastDay],0));
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Spending so far this month, day by day">${g}</svg>`;
 }
 function paceSection(A, list, mk){
   const isCur = mk === A.curMk, n = daysIn(mk), today = isCur ? Math.min(n, +todayISO().slice(8,10)) : n;
   const cur = cumDays(list, mk, S.withFixed);
-  const base = A.mks.filter(m => m < A.curMk && m !== mk && !(m === A.mks[0] && A.months[m].minDay > 5));
+  const base = A.completeMks.filter(m => m !== mk);
   let avg = null;
   if (base.length){ const arrs = base.map(m => cumDays(list, m, S.withFixed)); avg = Array.from({length:32}, (_, d) => mean(arrs.map(a => a[d]))); }
+  const name = esc(MONTHS_LONG[+mk.slice(5)-1]);
+  const vsAvg = diff => Math.abs(diff) < 1 ? "the same as" : `<b class="chg ${diff>0?"up":"down"}">${money(Math.abs(diff),0)} ${diff>0?"above":"below"}</b>`;
   let lead;
   if (!avg) lead = "Your usual pace appears once you have a complete month of receipts.";
-  else if (isCur){ const proj = cur[today] + (avg[n] - avg[today]), diff = proj - avg[n];
-    lead = `At your usual pace you'll end ${esc(MONTHS_LONG[+mk.slice(5)-1])} at about <b class="num">${money(proj,0)}</b>, ${Math.abs(diff) < 1 ? "the same as" : `<b class="chg ${diff>0?"up":"down"}">${money(Math.abs(diff),0)} ${diff>0?"above":"below"}</b>`} an average month.`; }
-  else { const diff = cur[n] - avg[n];
-    lead = `You ended ${esc(MONTHS_LONG[+mk.slice(5)-1])} at <b class="num">${money(cur[n],0)}</b>, ${Math.abs(diff) < 1 ? "the same as" : `<b class="chg ${diff>0?"up":"down"}">${money(Math.abs(diff),0)} ${diff>0?"above":"below"}</b>`} an average month.`; }
+  else if (isCur){ const proj = cur[today] + (avg[n] - avg[today]);
+    lead = `At your usual pace you'll end ${name} at about <b class="num">${money(proj,0)}</b>, ${vsAvg(proj - avg[n])} an average month.`; }
+  else lead = `You ended ${name} at <b class="num">${money(cur[n],0)}</b>, ${vsAvg(cur[n] - avg[n])} an average month.`;
   const note = (S.withFixed ? "Includes every category, rent and bills too." : `Left out: ${esc(catList(FIXED_COSTS))}. These fixed costs are usually paid on one day and would hide your everyday pace. Use the button above to include them.`)
-    + (avg ? ` Dashed line: your average of ${base.length} complete month${base.length===1?"":"s"}${base.length < A.mks.length ? " (the running month and a partly tracked first month don't count)" : ""}.` : "");
+    + (avg ? ` Dashed line: your average of ${base.length} complete month${plural(base.length)}${base.length < A.mks.length ? " (the running month and a partly tracked first month don't count)" : ""}.` : "");
   return `<div class="section pace">
     <div class="section-head"><h2>Spending pace</h2><button class="chip" data-action="togglefixed" aria-pressed="${S.withFixed}">${S.withFixed ? "Rent &amp; bills included" : "Rent &amp; bills left out"}</button></div>
     <p class="pace-lead">${lead}</p>
@@ -318,8 +330,7 @@ function paretoSection(A){
 
 function viewHome(A, list){
   const mk = S.month, M = A.months[mk] || {total:0, cats:{}, prods:{}, count:0, premium:0, premCats:{}, premProds:{}};
-  const idx = A.mks.indexOf(mk);
-  const allM = A.mks.includes(A.curMk) ? A.mks : [...A.mks, A.curMk];
+  const allM = monthList(A);
   const pos = allM.indexOf(mk);
   const {avg, sd: s, n} = A.stats;
   let vs = "";
@@ -329,8 +340,8 @@ function viewHome(A, list){
   const rowsHtml = cats.map(([c,v]) => {
     const open = S.openCat === c;
     let sub = "";
-    if (open){ const items = {}; const list = receipts().filter(r=>mkOf(r.date)===mk);
-      list.forEach(r => (r.items||[]).forEach(it => { if ((CAT[it.category]?it.category:"other")===c){ const k = key(it.product||it.name); items[k] = items[k] || {k, l:it.product||it.name, v:0, n:0}; items[k].v += num(it.price); items[k].n++; } }));
+    if (open){ const items = {};
+      list.filter(r=>mkOf(r.date)===mk).forEach(r => (r.items||[]).forEach(it => { if (catOf(it.category)===c){ const k = key(it.product||it.name); items[k] = items[k] || {k, l:it.product||it.name, v:0, n:0}; items[k].v += num(it.price); items[k].n++; } }));
       sub = `<div class="sub">${Object.values(items).sort((a,b)=>b.v-a.v).map(i=>`<div><span>${esc(i.l)}${i.n>1?` <span class="muted">×${i.n}</span>`:""}</span><span class="num">${M.premProds[i.k]?`<span class="prem">premium ${money(M.premProds[i.k])}</span> `:""}${money(i.v)}</span></div>`).join("")}</div>`; }
     return `<button class="row" data-cat="${c}" aria-expanded="${open}"><span class="chev-r">›</span><span class="name">${esc(CAT[c])}</span><span class="amt">${money(v)}${M.premCats[c]?`<small class="prem">premium ${money(M.premCats[c])}</small>`:""}</span><span class="meter"><i style="width:${(v/top*100).toFixed(1)}%"></i></span></button>${sub}`;
   }).join("");
@@ -338,14 +349,14 @@ function viewHome(A, list){
   return `
   <div class="section">
     <div class="monthbar"><button class="chev" data-month="-1" ${pos<=0?"disabled":""} aria-label="Previous month">‹</button><span class="m">${mkLabel(mk,true)}</span><button class="chev" data-month="1" ${pos>=allM.length-1?"disabled":""} aria-label="Next month">›</button></div>
-    <div class="hero"><span class="label">Spent this month</span><span class="big num">${money(M.total)}</span>${vs}<span class="small muted">${M.count} receipt${M.count===1?"":"s"}</span></div>
+    <div class="hero"><span class="label">Spent this month</span><span class="big num">${money(M.total)}</span>${vs}<span class="small muted">${M.count} receipt${plural(M.count)}</span></div>
   </div>
   <div class="stats">
     <div class="stat"><span class="label">Monthly avg</span><span class="v num">${avg?money(avg,0):"—"}</span></div>
     <div class="stat"><span class="label">Std deviation</span><span class="v num">${s?"± "+money(s,0):"—"}</span></div>
     <div class="stat"><span class="label">Typical range</span><span class="v num" style="font-size:.95rem;white-space:normal;line-height:1.25">${avg&&s?`${money(Math.max(0,avg-s),0)}–<br>${money(avg+s,0)}`:"—"}</span></div>
   </div>
-  <p class="small muted stats-note">${n?`Based on ${n} complete month${n===1?"":"s"}. The current month, and a first month you only partly tracked, are left out.`:"Averages appear once you have a complete month of receipts."}<br>Standard deviation shows how much your monthly spending varies from the average, so you can tell whether a month is usual or unusual.</p>
+  <p class="small muted stats-note">${n?`Based on ${n} complete month${plural(n)}. The current month, and a first month you only partly tracked, are left out.`:"Averages appear once you have a complete month of receipts."}<br>Standard deviation shows how much your monthly spending varies from the average, so you can tell whether a month is usual or unusual.</p>
   ${paceSection(A, list, mk)}
   <div class="section"><h2>Month by month</h2>${barChart(A, mk)}<span class="small muted chart-note">Bars: monthly totals. Dashed line: your monthly average. Includes every category, rent and bills too.</span></div>
   <div class="premium">
@@ -419,7 +430,7 @@ function viewInflation(A){
   <div class="section"><h1>Your inflation</h1><span class="muted small">How much the prices of the things <i>you</i> actually buy have changed. Some categories are left out because their prices can't be compared like for like (see the note under the chart).</span></div>
   <div class="hero"><span class="label">${span>=12?"Last 12 months":`Since ${mkLabel(ref.mk,true)} (${span} mo)`}</span><span class="big num">${pct(ch)}</span>
     ${span<12?`<span class="pill ${annual>0?"up":"down"}">≈ ${pct(annual)} per year at this pace</span>`:""}</div>
-  <div class="section"><span class="label">Price index, ${mkLabel(pts[0].mk)} = 100</span>${lineChart(pts.map(p=>({...p})), {base:100, label:"Personal price index"})}<span class="small muted chart-note">Left out: ${esc(catList([...NO_INDEX]))}. Only products bought in at least two different months count. Dashed line: 100, your starting level.</span><p class="small muted chart-note">This index reflects the prices you actually paid, including promotions and where you shopped. For a month-to-month breakdown of price changes for the same product at the same shop, see <button class="linkbtn" data-nav="home">“Why your spending changed” on Home</button>.</p></div>
+  <div class="section"><span class="label">Price index, ${mkLabel(pts[0].mk)} = 100</span>${lineChart(pts, {base:100, label:"Personal price index"})}<span class="small muted chart-note">Left out: ${esc(catList([...NO_INDEX]))}. Only products bought in at least two different months count. Dashed line: 100, your starting level.</span><p class="small muted chart-note">This index reflects the prices you actually paid, including promotions and where you shopped. For a month-to-month breakdown of price changes for the same product at the same shop, see <button class="linkbtn" data-nav="home">“Why your spending changed” on Home</button>.</p></div>
   <div class="section"><h2>Biggest price rises</h2><div class="ledger">${up.map(productRow).join("") || `<div class="empty">No price rises yet.</div>`}</div></div>
   ${down.length?`<div class="section"><h2>Got cheaper</h2><div class="ledger">${down.map(productRow).join("")}</div></div>`:""}
   <div class="section"><h2>By category</h2><table class="mini"><thead><tr><th>Category</th><th>Products</th><th>Change</th></tr></thead><tbody>
@@ -433,14 +444,15 @@ function viewHistory(A, list){
   return `
   <div class="section"><div class="section-head"><h1>Receipts</h1><button class="btn ghost" data-action="manual" style="padding:8px 14px;font-size:.9rem">+ Add expense</button></div>
   <span class="muted small">Tap a receipt to correct products, prices or categories.</span></div>
-  ${!isDemo() && S.rules.length ? `<div class="section repeats"><div class="section-head"><h2>Monthly repeats</h2><span class="num muted">${money(sum(S.rules.map(ruleTotal)))} / month</span></div>
-    <div class="ledger">${S.rules.map(R => `<div class="rule-row"><span class="st">${esc(R.store || R.items[0]?.product || "Expense")}</span><span class="num">${money(ruleTotal(R))}</span>
+  ${!isDemo() && S.rules.length ? `<div class="section repeats"><div class="section-head"><h2>Monthly repeats</h2><span class="num muted">${money(sum(S.rules.map(itemsTotal)))} / month</span></div>
+    <div class="ledger">${S.rules.map(R => `<div class="rule-row"><span class="st">${esc(R.store || R.items[0]?.product || "Expense")}</span><span class="num">${money(itemsTotal(R))}</span>
       <span class="meta">Every month on ${dayText(R.day)} · ${esc(untilText(R))}</span><button class="linkbtn" data-action="stoprule" data-rule="${esc(R.id)}">Stop</button></div>`).join("")}</div>
     <p class="small muted chart-note">Added automatically when the day arrives. To change the amount from now on, open the latest one below and tick “Use these details for future months”. Stopping keeps the months already added.</p></div>` : ""}
   ${mks.map(mk => `<div class="section"><div class="section-head"><h2>${mkLabel(mk,true)}</h2><span class="num muted">${money(A.months[mk]?.total||0)}</span></div>
-    <div class="ledger">${byM[mk].sort((a,b)=>b.date.localeCompare(a.date)).map(r=>`<button class="receipt" data-receipt="${esc(r.id)}">
-      <span class="st">${esc(r.store||"Expense")}</span><span class="num" style="font-family:var(--display)">${money(receiptTotal(r))}</span>
-      <span class="meta">${fmtDate(r.date)} · ${(r.items||[]).length} item${(r.items||[]).length===1?"":"s"} <span class="tag ${r.source==="manual"?"manual":"scan"}">${r.source==="manual"?"manual":"scanned"}</span>${r.recurringId?`<span class="tag repeat-tag">monthly</span>`:""}</span></button>`).join("")}</div></div>`).join("") || `<div class="empty">No receipts yet. Tap the button below to scan one.</div>`}`;
+    <div class="ledger">${byM[mk].sort((a,b)=>byDate(b,a)).map(r=>{ const n = (r.items||[]).length, manual = r.source==="manual";
+      return `<button class="receipt" data-receipt="${esc(r.id)}">
+      <span class="st">${esc(r.store||"Expense")}</span><span class="num" style="font-family:var(--display)">${money(itemsTotal(r))}</span>
+      <span class="meta">${fmtDate(r.date)} · ${n} item${plural(n)} <span class="tag ${manual?"manual":"scan"}">${manual?"manual":"scanned"}</span>${r.recurringId?`<span class="tag repeat-tag">monthly</span>`:""}</span></button>`; }).join("")}</div></div>`).join("") || `<div class="empty">No receipts yet. Tap the button below to scan one.</div>`}`;
 }
  
 /* ---------- sheets ---------- */
@@ -454,9 +466,18 @@ function closeSheet(){
   S.draft = null; $("#sheetRoot").innerHTML = ""; document.body.style.overflow = "";
 }
 const closeBtn = `<button class="icon-btn" data-action="close" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`;
- 
+const sheetHead = (title, h2attrs="") => `<div class="sheet-head"><h2${h2attrs}>${title}</h2>${closeBtn}</div>`;
+const thumb = url => url ? `<img class="thumb" src="${url}" alt="Your receipt photo">` : "";
+// First tap arms a dangerous button and changes its label; only a second tap within `ms` returns true.
+function confirmTap(b, prompt, ms=3000){
+  if (b.dataset.armed) return true;
+  const label = b.textContent; b.dataset.armed = "1"; b.textContent = prompt;
+  setTimeout(() => { if (b.isConnected){ delete b.dataset.armed; b.textContent = label; } }, ms);
+  return false;
+}
+
 function sheetAdd(){
-  openSheet(`<div class="sheet-head"><h2>Add a receipt</h2>${closeBtn}</div>
+  openSheet(`${sheetHead("Add a receipt")}
   <div class="choice">
     <button data-action="scan"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3.5"/></svg>
       <span><b style="font-family:var(--display);font-size:1.05rem;font-weight:700">Scan a receipt</b><br><span class="small muted">Take a photo or pick one. MijnParagon reads the date, shop, products and prices; you check them before saving.${S.limit?` ${Math.max(0,S.limit-(S.used||0))} of ${S.limit} scans left this month.`:""}</span></span></button>
@@ -466,23 +487,24 @@ function sheetAdd(){
 }
  
 function sheetSettings(){
-  const cfg = window.PARAGON_CONFIG || {};
   const feedbackSubject = encodeURIComponent("MijnParagon feedback");
   const feedbackBody = encodeURIComponent("Hi MijnParagon,\n\nMy feedback:\n\n");
-  openSheet(`<div class="sheet-head"><h2>Settings</h2>${closeBtn}</div>
+  const usageText = () => `${S.used}${S.limit?` of ${S.limit}`:""} used`;
+  const nAliases = Object.keys(S.aliases).length;
+  openSheet(`${sheetHead("Settings")}
     <div class="settings-list">
     <div class="card small"><span class="label">Signed in as</span><br><b id="setEmail"></b></div>
     <label class="field"><span class="label">Currency</span><select id="cur">${CURRENCIES.map(c=>`<option ${c===S.currency?"selected":""}>${c}</option>`).join("")}</select></label>
-    <div class="card small"><b>Scans this month</b><br><span class="muted" id="usage">${S.used!=null?`${S.used}${S.limit?` of ${S.limit}`:""} used`:"Checking…"}</span></div>
-    <div class="card small"><b>Learned corrections</b><br><span class="muted">${Object.keys(S.aliases).length} product name${Object.keys(S.aliases).length===1?"":"s"} remembered. When you fix a product name or category after a scan, MijnParagon applies the same fix to future receipts.</span></div>
+    <div class="card small"><b>Scans this month</b><br><span class="muted" id="usage">${S.used!=null?usageText():"Checking…"}</span></div>
+    <div class="card small"><b>Learned corrections</b><br><span class="muted">${nAliases} product name${plural(nAliases)} remembered. When you fix a product name or category after a scan, MijnParagon applies the same fix to future receipts.</span></div>
     <a class="btn ghost wide" style="display:block;text-align:center;text-decoration:none" href="mailto:info@mijnparagon.nl?subject=${feedbackSubject}&body=${feedbackBody}">Send feedback</a>
     <button class="btn ghost wide" data-action="export">Export my data (CSV)</button>
     <button class="btn ghost wide" data-action="signout">Sign out</button>
     <button class="btn danger wide" data-action="delaccount" id="delAccBtn">Delete my account and all data</button>
-    <p class="foot"><a href="${esc(cfg.privacyUrl||"privacy.html")}" target="_blank" rel="noopener">Privacy policy</a></p>
+    <p class="foot"><a href="${PRIVACY_URL}" target="_blank" rel="noopener">Privacy policy</a></p>
     </div>`);
   $("#setEmail").textContent = S.user?.email || "";
-  refreshUsage().then(() => { const u = $("#usage"); if (u && S.used != null) u.textContent = `${S.used}${S.limit?` of ${S.limit}`:""} used`; });
+  refreshUsage().then(() => { const u = $("#usage"); if (u && S.used != null) u.textContent = usageText(); });
 }
  
 function sheetProduct(k){
@@ -494,7 +516,7 @@ function sheetProduct(k){
   if (P.stores.length > 1){ const [cs, cp] = P.stores[0], [es, ep] = P.stores[P.stores.length-1]; notes.push(`Cheapest at ${cs} (${money(cp)}), dearest at ${es} (${money(ep)}): ${pct(ep/cp-1,0)}.`); }
   if (Math.abs(P.lastVsAvg) > .03) notes.push(`Last time you paid ${pct(P.lastVsAvg,0)} ${P.lastVsAvg>0?"more":"less"} than usual.`);
   notes.push(`You buy it about ${P.perMonth >= 1 ? P.perMonth.toFixed(1)+"× a month" : "once every "+Math.round(1/P.perMonth)+" months"}, ${money(P.total/Math.max(1,A.mks.length))} a month on average.`);
-  openSheet(`<div class="sheet-head"><h2 style="text-transform:capitalize">${esc(P.label)}</h2>${closeBtn}</div>
+  openSheet(`${sheetHead(esc(P.label), ` style="text-transform:capitalize"`)}
     <span class="small muted">${esc(CAT[P.category])} · ${P.buys.length} purchases · ${money(P.total)} total</span>
     <div class="stats">
       <div class="stat"><span class="label">Avg / ${unit}</span><span class="v num">${money(P.avgUnit)}</span></div>
@@ -510,13 +532,16 @@ function sheetProduct(k){
 function blankItem(){ return {name:"", product:"", category:"other", qty:1, unit:"pcs", unitPrice:0, price:0}; }
 function startEditor(draft){ S.draft = draft; if (draft.recurringId){ const R = S.rules.find(x => x.id === draft.recurringId); if (R) draft.until = R.until || ""; } renderEditor(); }
 function renderEditorKeep(){ const sc = document.querySelector(".sheet")?.scrollTop || 0; renderEditor(); const sh = document.querySelector(".sheet"); if (sh) sh.scrollTop = sc; }
+// warning when the lines don't add up to the total printed on the receipt
+const mismatchWarn = (D, total) => D.printedTotal && Math.abs(D.printedTotal - total) > .02
+  ? `<div class="warn">The receipt says ${money(D.printedTotal)}, the lines add up to ${money(total)}. A line may be missing or misread.</div>` : "";
+const UNITS = [["pcs","pcs"],["kg","kg"],["l","litre"]];
 function renderEditor(){
-  const D = S.draft; const total = r2(sum(D.items.map(i=>num(i.price))));
-  const mismatch = D.printedTotal && Math.abs(D.printedTotal - total) > .02;
+  const D = S.draft; const total = itemsTotal(D);
   const isNew = !D.id;
-  openSheet(`<div class="sheet-head"><h2>${D.source==="scan"?(isNew?"Check the scan":"Edit receipt"):(isNew?"New expense":"Edit expense")}</h2>${closeBtn}</div>
+  openSheet(`${sheetHead(D.source==="scan"?(isNew?"Check the scan":"Edit receipt"):(isNew?"New expense":"Edit expense"))}
     ${D.demo?`<div class="warn">This is an example receipt. Changes to example data aren't saved.</div>`:""}
-    ${D.imageUrl?`<img class="thumb" src="${D.imageUrl}" alt="Your receipt photo">`:""}
+    ${thumb(D.imageUrl)}
     ${D.source==="scan"&&isNew?`<span class="small muted">Compare with the photo and fix anything the scanner misread. Product names group the same item across shops and months.</span>`:""}
     <div class="two"><label class="field"><span class="label">Shop / payee</span><input id="f-store" value="${esc(D.store)}" placeholder="e.g. Lidl"></label>
       <label class="field"><span class="label">Date</span><input id="f-date" type="date" value="${esc(D.date)}"></label></div>
@@ -528,12 +553,12 @@ function renderEditor(){
       <div class="line2">
         <select data-i="${i}" data-f="category" aria-label="Category">${CATS.map(([id,l])=>`<option value="${id}" ${id===it.category?"selected":""}>${l}</option>`).join("")}</select>
         <input data-i="${i}" data-f="qty" inputmode="decimal" value="${esc(it.qty)}" aria-label="Quantity">
-        <select data-i="${i}" data-f="unit" aria-label="Unit"><option value="pcs" ${it.unit==="pcs"?"selected":""}>pcs</option><option value="kg" ${it.unit==="kg"?"selected":""}>kg</option><option value="l" ${it.unit==="l"?"selected":""}>litre</option></select>
+        <select data-i="${i}" data-f="unit" aria-label="Unit">${UNITS.map(([id,l])=>`<option value="${id}" ${it.unit===id?"selected":""}>${l}</option>`).join("")}</select>
       </div></div>`).join("")}</div>
     <button class="btn ghost" data-action="additem">+ Add line</button>
     ${D.source === "manual" && !D.demo ? repeatBlock(D) : ""}
     <div class="totals"><span>Total</span><span class="num" id="f-total">${money(total)}</span></div>
-    <div id="f-warn">${mismatch?`<div class="warn">The receipt says ${money(D.printedTotal)}, the lines add up to ${money(total)}. A line may be missing or misread.</div>`:""}</div>
+    <div id="f-warn">${mismatchWarn(D, total)}</div>
     <div class="actions"><button class="btn" data-action="save" ${D.demo?"disabled":""}>Save</button>
       ${!isNew&&!D.demo?`<button class="btn danger" data-action="delete" id="delBtn">Delete</button>`:""}</div>`);
 }
@@ -561,15 +586,15 @@ function onEditorInput(e){
   else if (el.dataset.f){ const it = D.items[+el.dataset.i]; const f = el.dataset.f;
     it[f] = el.value;
     if (f === "price" || f === "qty"){ const q = num(it.qty)||1; it.unitPrice = r2(num(it.price)/q); }
-    const total = r2(sum(D.items.map(i=>num(i.price)))); const t = $("#f-total"); if (t) t.textContent = money(total);
-    const w = $("#f-warn"); if (w) w.innerHTML = D.printedTotal && Math.abs(D.printedTotal-total) > .02 ? `<div class="warn">The receipt says ${money(D.printedTotal)}, the lines add up to ${money(total)}. A line may be missing or misread.</div>` : "";
+    const total = itemsTotal(D); const t = $("#f-total"); if (t) t.textContent = money(total);
+    const w = $("#f-warn"); if (w) w.innerHTML = mismatchWarn(D, total);
   }
 }
 async function saveDraft(){
   const D = S.draft; if (!D) return;
   const items = D.items.map(it => { const qty = num(it.qty)||1, price = r2(num(it.price));
-    const product = String(it.product||it.name||"").trim().toLowerCase();
-    return {name: String(it.name||product).trim(), product, category: CAT[it.category]?it.category:"other", qty, unit: it.unit||"pcs", unitPrice: r2(price/qty), price}; })
+    const product = key(it.product||it.name);
+    return {name: String(it.name||product).trim(), product, category: catOf(it.category), qty, unit: it.unit||"pcs", unitPrice: r2(price/qty), price}; })
     .filter(it => it.product || it.price);
   if (!items.length){ toast("Add at least one line with a price."); return; }
   if (!D.date){ toast("Pick a date."); return; }
@@ -599,8 +624,7 @@ async function saveDraft(){
   } catch(e){ if (btn){ btn.disabled = false; btn.textContent = "Save"; } toast("Couldn't save. Check your connection and try again."); }
 }
 async function deleteDraft(){
-  const b = $("#delBtn"); if (!b) return;
-  if (!b.dataset.armed){ b.dataset.armed = "1"; b.textContent = "Tap again to delete"; setTimeout(()=>{ if(b.isConnected){ delete b.dataset.armed; b.textContent = "Delete"; } }, 3000); return; }
+  const b = $("#delBtn"); if (!b || !confirmTap(b, "Tap again to delete")) return;
   try { await removeReceipt(S.draft.id); closeSheet(); render(); toast("Deleted"); } catch(e){ toast("Couldn't delete. Try again."); }
 }
  
@@ -611,8 +635,10 @@ const configured = !!(CFG.supabaseUrl && CFG.supabaseKey && window.supabase) && 
 const SB_URL = String(CFG.supabaseUrl || "").trim().replace(/\/+$/, "").replace(/\/rest\/v1$/, "");
 let sb = null;
 try { if (configured) sb = window.supabase.createClient(SB_URL, String(CFG.supabaseKey).trim()); } catch(e){ console.error(e); }
+const PRIVACY_URL = esc(CFG.privacyUrl || "privacy.html");
 const thisMonth = () => new Date().toISOString().slice(0,7);
 const fromRow = r => ({id:r.id, date:r.date, store:r.store||"", items:r.items||[], source:r.source, printedTotal: r.printed_total==null ? null : Number(r.printed_total), createdAt:r.created_at, recurringId:r.recurring_id || null});
+const toRow = rec => ({id:rec.id, date:rec.date, store:rec.store, items:rec.items, source:rec.source, printed_total: rec.printedTotal ?? null, recurring_id: rec.recurringId || null, updated_at:new Date().toISOString()});
 const ruleFromRow = r => ({id:r.id, store:r.store||"", items:r.items||[], day:r.day, startMonth:r.start_month, until:r.until || null, lastGenerated:r.last_generated});
  
 async function loadData(){
@@ -644,11 +670,10 @@ async function refreshUsage(){
   S.used = data ? data.count : 0;
 }
 async function persistReceipt(rec){
-  const row = {id:rec.id, date:rec.date, store:rec.store, items:rec.items, source:rec.source, printed_total: rec.printedTotal ?? null, recurring_id: rec.recurringId || null, updated_at:new Date().toISOString()};
-  const {error} = await sb.from("receipts").upsert(row);
+  const {error} = await sb.from("receipts").upsert(toRow(rec));
   if (error) throw error;
   const i = S.real.findIndex(r=>r.id===rec.id); if (i>=0) S.real[i] = rec; else S.real.push(rec);
-  S.real.sort((a,b)=>a.date.localeCompare(b.date));
+  S.real.sort(byDate);
 }
 async function removeReceipt(id){
   const {error} = await sb.from("receipts").delete().eq("id", id);
@@ -656,9 +681,7 @@ async function removeReceipt(id){
   S.real = S.real.filter(r=>r.id!==id);
 }
 /* ---------- monthly repeats ---------- */
-const dayOf = iso => +String(iso).slice(8,10) || 1;
 const dateIn = (mk, day) => `${mk}-${pad(Math.min(day, daysIn(mk)))}`;
-const ruleTotal = R => r2(sum((R.items||[]).map(i => num(i.price))));
 // Same repeat + same month always gives the same id, so two devices can't add a month twice.
 async function seriesId(ruleId, mk){
   const h = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(ruleId + "|" + mk)));
@@ -674,7 +697,7 @@ async function generateRecurring(){
     while (mk < nowMk){
       const next = addMonths(mk, 1), date = dateIn(next, R.day);
       if (date > today || (R.until && date > R.until)) break;
-      rows.push({id: await seriesId(R.id, next), date, store: R.store, items: R.items, source: "manual", printed_total: null, recurring_id: R.id, updated_at: new Date().toISOString()});
+      rows.push(toRow({id: await seriesId(R.id, next), date, store: R.store, items: R.items, source: "manual", recurringId: R.id}));
       mk = next;
     }
     if (!rows.length) continue;
@@ -683,7 +706,7 @@ async function generateRecurring(){
     R.lastGenerated = mk;
     rows.forEach(r => { if (!S.real.some(x => x.id === r.id)) S.real.push(fromRow(r)); });
   }
-  S.real.sort((a,b) => a.date.localeCompare(b.date));
+  S.real.sort(byDate);
 }
 async function saveRule(R){
   const {error} = await sb.from("recurring").upsert({id:R.id, store:R.store, items:R.items, day:R.day, start_month:R.startMonth, until:R.until || null, last_generated:R.lastGenerated, updated_at:new Date().toISOString()});
@@ -721,8 +744,8 @@ async function runScan(file){
   const url = URL.createObjectURL(file);
   S.draft = {imageUrl:url, source:"scan", items:[]};
   const ctl = new AbortController(); S.scanCtl = ctl;
-  openSheet(`<div class="sheet-head"><h2>Scanning</h2>${closeBtn}</div>
-    <img class="thumb" src="${url}" alt="Your receipt photo">
+  openSheet(`${sheetHead("Scanning")}
+    ${thumb(url)}
     <div class="scanning"><div class="progress"><i></i></div><span class="muted small">Reading shop, date, products and prices… this usually takes 5–20 seconds.</span>
     <button class="btn ghost" data-action="close">Stop</button></div>`);
   let code = "server_error", detail = "";
@@ -739,7 +762,7 @@ async function runScan(file){
     S.scanCtl = null;
     const res = data.receipt; S.used = data.used; S.limit = data.limit;
     const items = res.items.map(it => {
-      const name = String(it.name||"").trim(); let product = key(it.product || name); let category = CAT[it.category] ? it.category : "other";
+      const name = String(it.name||"").trim(); let product = key(it.product || name); let category = catOf(it.category);
       const a = S.aliases[key(name)]; if (a){ product = a.product; category = a.category; }
       const qty = num(it.qty)||1, price = r2(num(it.price)); const unit = ["pcs","kg","l"].includes(it.unit)?it.unit:"pcs";
       return {name, product, category, qty, unit, unitPrice: r2(num(it.unitPrice) || price/qty), price};
@@ -761,8 +784,8 @@ async function runScan(file){
       not_signed_in: "Your session has ended. Sign in again to scan.",
       offline: "You're offline. Connect to the internet to scan, or add the receipt by hand."
     }[code] || "Something went wrong while reading the receipt. Try again, or add it by hand.";
-    openSheet(`<div class="sheet-head"><h2>Couldn't read it</h2>${closeBtn}</div>
-      ${S.draft?.imageUrl?`<img class="thumb" src="${S.draft.imageUrl}" alt="Your receipt photo">`:""}
+    openSheet(`${sheetHead("Couldn't read it")}
+      ${thumb(S.draft?.imageUrl)}
       <div class="warn">${esc(msg)}</div>
       <details class="small muted"><summary>Technical details</summary><code style="word-break:break-all">${esc(code)} · ${esc(detail)} · ${esc(location.origin)}</code></details>
       <div class="actions">${code!=="limit_reached"?`<button class="btn" data-action="scan">Try another photo</button>`:""}<button class="btn ghost" data-action="manual-keep">Enter by hand</button></div>`);
@@ -773,7 +796,7 @@ async function runScan(file){
 function exportCsv(){
   const q = v => { const s = String(v ?? ""); return /[",\n;]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; };
   const rows = [["date","store","source","product","name_on_receipt","category","qty","unit","unit_price","price","currency"]];
-  [...S.real].sort((a,b)=>a.date.localeCompare(b.date)).forEach(r => (r.items||[]).forEach(it =>
+  [...S.real].sort(byDate).forEach(r => (r.items||[]).forEach(it =>
     rows.push([r.date, r.store, r.source, it.product, it.name, CAT[it.category]||"Other", it.qty, it.unit, it.unitPrice, it.price, S.currency])));
   if (rows.length === 1){ toast("Nothing to export yet."); return; }
   const blob = new Blob(["﻿" + rows.map(r=>r.map(q).join(",")).join("\n")], {type:"text/csv;charset=utf-8"});
@@ -781,8 +804,7 @@ function exportCsv(){
   document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
 async function deleteAccount(){
-  const b = $("#delAccBtn"); if (!b) return;
-  if (!b.dataset.armed){ b.dataset.armed = "1"; b.textContent = "Tap again: this can't be undone"; setTimeout(()=>{ if(b.isConnected){ delete b.dataset.armed; b.textContent = "Delete my account and all data"; } }, 4000); return; }
+  const b = $("#delAccBtn"); if (!b || !confirmTap(b, "Tap again: this can't be undone", 4000)) return;
   b.disabled = true; b.textContent = "Deleting…";
   const {error} = await sb.functions.invoke("delete-account", {body:{}});
   if (error){ b.disabled = false; b.textContent = "Delete my account and all data"; toast("Couldn't delete the account. Try again."); return; }
@@ -797,28 +819,24 @@ function showAuth(mode, msg){
   $("#app").hidden = true; $("#tabs").hidden = true; closeSheet();
   const root = $("#authRoot"); root.hidden = false;
   const m = authMsg ? `<div class="msg ${authMsg.err?"err":""}">${esc(authMsg.text)}</div>` : "";
-  const privacy = `<p class="foot">By creating an account you agree to the <a href="${esc(CFG.privacyUrl||"privacy.html")}" target="_blank" rel="noopener">privacy policy</a>.</p>`;
+  const privacy = `<p class="foot">By creating an account you agree to the <a href="${PRIVACY_URL}" target="_blank" rel="noopener">privacy policy</a>.</p>`;
   if (!configured){
     root.innerHTML = `<div class="auth">${BRAND}<div class="msg err">MijnParagon isn't connected to its database yet. Fill in <b>config.js</b> with your Supabase URL and key (see README).</div></div>`; return;
   }
+  const email = `<label class="field"><span class="label">Email</span><input id="a-email" type="email" autocomplete="email" required></label>`;
+  const newPass = label => `<label class="field"><span class="label">${label} (at least 8 characters)</span><input id="a-pass" type="password" autocomplete="new-password" minlength="8" required></label>`;
+  const form = (name, title, fields, submit) => `<h2 style="text-align:center">${title}</h2>
+      <form data-form="${name}">${fields}
+      <button class="btn wide" type="submit">${submit}</button></form>`;
   const forms = {
-    signin: `<h2 style="text-align:center">Sign in</h2>
-      <form data-form="signin"><label class="field"><span class="label">Email</span><input id="a-email" type="email" autocomplete="email" required></label>
-      <label class="field"><span class="label">Password</span><input id="a-pass" type="password" autocomplete="current-password" required></label>
-      <button class="btn wide" type="submit">Sign in</button></form>
+    signin: form("signin", "Sign in", email + `
+      <label class="field"><span class="label">Password</span><input id="a-pass" type="password" autocomplete="current-password" required></label>`, "Sign in") + `
       <div class="switch"><button class="linkbtn" data-auth="signup">Create an account</button><button class="linkbtn" data-auth="forgot">Forgot password?</button></div>`,
-    signup: `<h2 style="text-align:center">Create your account</h2>
-      <form data-form="signup"><label class="field"><span class="label">Email</span><input id="a-email" type="email" autocomplete="email" required></label>
-      <label class="field"><span class="label">Password (at least 8 characters)</span><input id="a-pass" type="password" autocomplete="new-password" minlength="8" required></label>
-      <button class="btn wide" type="submit">Create account</button></form>
+    signup: form("signup", "Create your account", email + newPass("Password"), "Create account") + `
       <div class="switch"><button class="linkbtn" data-auth="signin">I already have an account</button></div>${privacy}`,
-    forgot: `<h2 style="text-align:center">Reset your password</h2>
-      <form data-form="forgot"><label class="field"><span class="label">Email</span><input id="a-email" type="email" autocomplete="email" required></label>
-      <button class="btn wide" type="submit">Send reset link</button></form>
+    forgot: form("forgot", "Reset your password", email, "Send reset link") + `
       <div class="switch"><button class="linkbtn" data-auth="signin">Back to sign in</button></div>`,
-    reset: `<h2 style="text-align:center">Choose a new password</h2>
-      <form data-form="reset"><label class="field"><span class="label">New password (at least 8 characters)</span><input id="a-pass" type="password" autocomplete="new-password" minlength="8" required></label>
-      <button class="btn wide" type="submit">Save password</button></form>`
+    reset: form("reset", "Choose a new password", newPass("New password"), "Save password")
   };
   root.innerHTML = `<div class="auth">${BRAND}<p class="lead">Scan your receipts. See where the money goes and how your prices change.</p>${m}${forms[authMode]}</div>`;
 }
@@ -857,10 +875,9 @@ document.addEventListener("click", e => {
   const au = e.target.closest("[data-auth]"); if (au){ showAuth(au.dataset.auth); return; }
   const t = e.target.closest("[data-action],[data-nav],[data-cat],[data-prod],[data-receipt],[data-month],[data-scrim]");
   if (!t) return;
-  if (t.dataset.scrim !== undefined && e.target !== t) return;
-  if (t.dataset.scrim !== undefined){ if (!S.scanCtl) closeSheet(); return; }
+  if (t.dataset.scrim !== undefined){ if (e.target === t && !S.scanCtl) closeSheet(); return; }
   if (t.dataset.nav){ S.view = t.dataset.nav; if (location.hash !== "#"+S.view) history.replaceState(null, "", "#"+S.view); closeSheet(); render(); window.scrollTo(0,0); return; }
-  if (t.dataset.month){ const A = analyze(receipts()); const allM = A.mks.includes(A.curMk) ? A.mks : [...A.mks, A.curMk]; const i = allM.indexOf(S.month) + +t.dataset.month; if (allM[i]){ S.month = allM[i]; S.openCat = null; render(); } return; }
+  if (t.dataset.month){ const allM = monthList(analyze(receipts())); const i = allM.indexOf(S.month) + +t.dataset.month; if (allM[i]){ S.month = allM[i]; S.openCat = null; render(); } return; }
   if (t.dataset.cat){ S.openCat = S.openCat === t.dataset.cat ? null : t.dataset.cat; render(); return; }
   if (t.dataset.prod){ sheetProduct(t.dataset.prod); return; }
   if (t.dataset.receipt){ const r = receipts().find(x=>x.id===t.dataset.receipt); if (r) startEditor({...JSON.parse(JSON.stringify(r)), printedTotal:r.printedTotal||null}); return; }
@@ -879,7 +896,7 @@ document.addEventListener("click", e => {
   else if (a === "togglefixed"){ S.withFixed = !S.withFixed; render(); }
   else if (a === "stoprule"){
     const id = t.dataset.rule || S.draft?.recurringId; if (!id) return;
-    if (!t.dataset.armed){ t.dataset.armed = "1"; t.textContent = "Tap again to stop"; setTimeout(() => { if (t.isConnected){ delete t.dataset.armed; t.textContent = t.dataset.rule ? "Stop" : "Stop repeating"; } }, 3000); return; }
+    if (!confirmTap(t, "Tap again to stop")) return;
     stopRule(id).then(() => { if (S.draft){ closeSheet(); } render(); toast("Stopped. Months already added stay."); }).catch(() => toast("Couldn't stop it. Try again."));
   }
   else if (a === "signout"){ closeSheet(); sb.auth.signOut(); }
@@ -895,11 +912,11 @@ document.addEventListener("change", async e => {
   if (S.draft && e.target.tagName === "SELECT") onEditorInput(e);
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && $("#sheetRoot").firstChild) closeSheet(); });
-function fromHash(){ const h = location.hash.slice(1); if (["home","products","inflation","history"].includes(h)){ S.view = h; if (S.user) render(); } }
+function fromHash(){ const h = location.hash.slice(1); if (Object.hasOwn(VIEWS, h)){ S.view = h; if (S.user) render(); } }
 window.addEventListener("hashchange", fromHash);
- 
+
 /* ---------- boot ---------- */
-const h0 = location.hash.slice(1); if (["home","products","inflation","history"].includes(h0)) S.view = h0;
+fromHash();
 if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(()=>{});
 if (!sb) showAuth();
 else {

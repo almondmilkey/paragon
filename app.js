@@ -824,15 +824,16 @@ function showAuth(mode, msg){
     root.innerHTML = `<div class="auth">${BRAND}<div class="msg err">MijnParagon isn't connected to its database yet. Fill in <b>config.js</b> with your Supabase URL and key (see README).</div></div>`; return;
   }
   const email = `<label class="field"><span class="label">Email</span><input id="a-email" type="email" autocomplete="email" required></label>`;
-  const newPass = label => `<label class="field"><span class="label">${label} (at least 8 characters)</span><input id="a-pass" type="password" autocomplete="new-password" minlength="8" required></label>`;
+  const newPass = label => `<label class="field"><span class="label">${label} (8+ characters, letters and numbers)</span><input id="a-pass" type="password" autocomplete="new-password" minlength="8" required></label>`;
   const form = (name, title, fields, submit) => `<h2 style="text-align:center">${title}</h2>
-      <form data-form="${name}">${fields}
+      <form data-form="${name}"${name === "signup" ? " novalidate" : ""}>${fields}
       <button class="btn wide" type="submit">${submit}</button></form>`;
   const forms = {
     signin: form("signin", "Sign in", email + `
       <label class="field"><span class="label">Password</span><input id="a-pass" type="password" autocomplete="current-password" required></label>`, "Sign in") + `
       <div class="switch"><button class="linkbtn" data-auth="signup">Create an account</button><button class="linkbtn" data-auth="forgot">Forgot password?</button></div>`,
-    signup: form("signup", "Create your account", email + newPass("Password"), "Create account") + `
+    signup: form("signup", "Create your account", email + newPass("Password") + `
+      <altcha-widget challenge="${esc(SB_URL)}/functions/v1/altcha-challenge" auto="onfocus" name="altcha" language="en"></altcha-widget>`, "Create account") + `
       <div class="switch"><button class="linkbtn" data-auth="signin">I already have an account</button></div>${privacy}`,
     forgot: form("forgot", "Reset your password", email, "Send reset link") + `
       <div class="switch"><button class="linkbtn" data-auth="signin">Back to sign in</button></div>`,
@@ -841,6 +842,21 @@ function showAuth(mode, msg){
   root.innerHTML = `<div class="auth">${BRAND}<p class="lead">Scan your receipts. See where the money goes and how your prices change.</p>${m}${forms[authMode]}</div>`;
 }
 const redirectTo = () => location.origin + location.pathname;
+// Waits for the ALTCHA robot check in the sign-up form and returns its result ("" if it failed).
+async function altchaPayload(f){
+  const w = f.querySelector("altcha-widget"), val = () => f.querySelector('input[name="altcha"]')?.value || "";
+  if (val() || !w) return val();
+  return new Promise(resolve => {
+    const done = v => { clearTimeout(timer); resolve(v); };
+    const timer = setTimeout(() => done(val()), 45000);
+    w.addEventListener("statechange", ev => {
+      const st = ev.detail?.state;
+      if (st === "verified") setTimeout(() => done(val()), 0);
+      else if (st === "error" || st === "expired") done("");
+    });
+    try { if (w.getState?.() !== "verifying") w.verify?.(); } catch(_){}
+  });
+}
 document.addEventListener("submit", async e => {
   const f = e.target.closest("[data-form]"); if (!f) return;
   e.preventDefault();
@@ -851,9 +867,23 @@ document.addEventListener("submit", async e => {
       const {error} = await sb.auth.signInWithPassword({email, password});
       if (error) showAuth("signin", {err:true, text: /confirm/i.test(error.message) ? "Confirm your email first: open the link we sent you." : "Email or password is wrong."});
     } else if (f.dataset.form === "signup"){
-      const {data, error} = await sb.auth.signUp({email, password, options:{emailRedirectTo: redirectTo()}});
-      if (error) showAuth("signup", {err:true, text: error.message});
-      else if (!data.session) showAuth("signin", {text:`Almost done: we sent a confirmation link to ${email}. Open it, then sign in.`});
+      // the form skips the browser's own checks so a click during the robot check isn't blocked
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)){ showAuth("signup", {err:true, text:"That email address doesn't look right."}); return; }
+      if (password.length < 8 || !/[A-Za-z]/.test(password) || !/[0-9]/.test(password)){ showAuth("signup", {err:true, text:"Use at least 8 characters with both letters and numbers."}); return; }
+      btn.textContent = "Checking you're not a robot…";
+      const altcha = await altchaPayload(f);
+      if (!altcha){ showAuth("signup", {err:true, text:"The robot check didn't finish. Tick the box above the button and try again."}); return; }
+      btn.textContent = "Creating your account…";
+      const {error} = await sb.functions.invoke("signup", {body:{email, password, altcha}});
+      if (error){
+        let code = "server_error"; try { code = (await error.context.json()).error || code; } catch(_){}
+        showAuth("signup", {err:true, text: {
+          altcha_failed: "The robot check didn't go through. Please try again.",
+          invalid_email: "That email address doesn't look right.",
+          weak_password: "Use at least 8 characters with both letters and numbers.",
+          rate_limited: "Too many sign-ups right now. Please try again in an hour."
+        }[code] || "Couldn't create the account. Please try again later."});
+      } else showAuth("signin", {text:`Almost done: if ${email} is new here, a confirmation link is on its way. Open it to start using MijnParagon.`});
     } else if (f.dataset.form === "forgot"){
       const {error} = await sb.auth.resetPasswordForEmail(email, {redirectTo: redirectTo()});
       showAuth("signin", error ? {err:true, text:error.message} : {text:`If ${email} has an account, a reset link is on its way.`});

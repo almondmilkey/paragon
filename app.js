@@ -870,6 +870,28 @@ function enterApp(){
   loadData();
 }
  
+/* ---------- light / dark mode ---------- */
+// The choice is remembered on this device only. Until someone picks one, the app follows the phone's setting.
+const LS_THEME = "paragon.theme";
+const systemDark = matchMedia("(prefers-color-scheme: dark)");
+const SUN = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>`;
+const MOON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>`;
+const currentTheme = () => document.documentElement.dataset.theme || (systemDark.matches ? "dark" : "light");
+function applyTheme(){
+  const dark = currentTheme() === "dark";
+  // phone status bar colour follows the app
+  document.querySelectorAll('meta[name="theme-color"]').forEach(m => { m.content = dark ? "#0b2230" : "#f5e9d8"; });
+  // the button shows the mode you'd switch to
+  const b = $("#themeBtn"); b.innerHTML = dark ? SUN : MOON; b.setAttribute("aria-label", dark ? "Switch to light mode" : "Switch to dark mode");
+}
+function toggleTheme(){
+  const next = currentTheme() === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem(LS_THEME, next); } catch(_){}
+  applyTheme();
+}
+systemDark.addEventListener("change", applyTheme);
+
 /* ---------- events ---------- */
 document.addEventListener("click", e => {
   const au = e.target.closest("[data-auth]"); if (au){ showAuth(au.dataset.auth); return; }
@@ -884,6 +906,7 @@ document.addEventListener("click", e => {
   const a = t.dataset.action;
   if (a === "add") sheetAdd();
   else if (a === "settings") sheetSettings();
+  else if (a === "theme") toggleTheme();
   else if (a === "close") closeSheet();
   else if (a === "scan"){ if (S.limit && S.used >= S.limit){ toast(`You've used all ${S.limit} scans this month.`); return; } const fi = $("#fileInput"); fi.value = ""; fi.click(); }
   else if (a === "manual"){ closeSheet(); startEditor({source:"manual", store:"", date:todayISO(), items:[blankItem()]}); }
@@ -917,6 +940,7 @@ window.addEventListener("hashchange", fromHash);
 
 /* ---------- boot ---------- */
 fromHash();
+applyTheme();
 if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(()=>{});
 if (!sb) showAuth();
 else {

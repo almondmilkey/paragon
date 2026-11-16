@@ -40,6 +40,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{ou
 
 .top{display:flex; align-items:center; justify-content:space-between; gap:12px}
 .brand{display:flex; align-items:center; gap:10px}
+.top-actions{display:flex; align-items:center; gap:2px}
 .brand svg{width:34px; height:34px; flex:none}
 .brand b{font-family:var(--display); font-size:1.3rem; font-weight:700; letter-spacing:.01em}
 .brand img,.brand svg{width:34px; height:34px; flex:none}

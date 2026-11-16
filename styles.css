@@ -220,3 +220,9 @@ table.mini.decomp tr.tot td{font-weight:600; border-bottom:0}
 .rule-row .st{font-family:var(--display); font-size:1.02rem}
 .rule-row .meta{font-size:.8rem; color:var(--muted)}
 .tag.repeat-tag{background:var(--line); color:var(--ink); margin-left:4px}
+
+/* ALTCHA robot check on the sign-up form */
+altcha-widget{display:block;
+  --altcha-color-base:var(--paper); --altcha-color-base-content:var(--ink); --altcha-border-color:var(--line);
+  --altcha-border-radius:10px; --altcha-color-primary:var(--taupe); --altcha-color-primary-content:var(--taupe-ink);
+  --altcha-max-width:100%}

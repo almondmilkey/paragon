@@ -96,6 +96,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{ou
 .card{background:var(--paper); border:1px solid var(--line); border-radius:16px; padding:14px}
 .soon{display:flex; flex-direction:column; gap:6px; border-style:dashed}
 .tag{display:inline-block; font-size:.68rem; letter-spacing:.08em; text-transform:uppercase; padding:2px 8px; border-radius:999px; background:var(--mint); color:var(--mint-ink); font-weight:600}
+/* highlighter for an important sentence, in the app's light blue */
+mark.hl{background:var(--mint); color:var(--mint-ink); border-radius:4px; padding:1px 4px; -webkit-box-decoration-break:clone; box-decoration-break:clone}
 .tag.scan{background:var(--mint)} .tag.manual{background:var(--line); color:var(--ink)}
 
 .prod{display:grid; grid-template-columns:1fr auto; gap:2px 12px; padding:12px 2px; border-bottom:1px solid var(--line); width:100%; background:none; border-left:0;border-right:0;border-top:0; text-align:left}

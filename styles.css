@@ -74,6 +74,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{ou
 .chart .grid{stroke:var(--line); stroke-width:1}
 .chart .bar{fill:var(--taupe); opacity:.28}
 .chart .bar.sel{opacity:1}
+.chart .hit{fill:transparent; cursor:pointer}
+.chart .pbar:hover .bar{opacity:.5} .chart .pbar:hover .bar.sel{opacity:.75}
 .chart .avg{stroke:var(--slate); stroke-width:1.5; stroke-dasharray:4 3; fill:none}
 .chart .line{stroke:var(--taupe); stroke-width:2; fill:none}
 .chart .area{fill:var(--taupe); opacity:.12}

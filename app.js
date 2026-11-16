@@ -317,17 +317,44 @@ function paceSection(A, list, mk){
     ${paceChart(mk, cur, avg, today)}
     <p class="small muted chart-note">${note}</p></div>`;
 }
+// One bar per product, largest on the left. The dashed line is what each product would cost if the month's
+// spending were split evenly, so the shape shows at a glance whether a few products dominate.
+function paretoChart(ps, tot){
+  const W=340,H=170,L=40,B=8,T=16,R=6, n = ps.length, even = tot/n;
+  const max = niceMax(ps[0].v), y = v => T + (H-T-B)*(1 - v/max), bw = (W-L-R)/n;
+  const w = Math.max(1, bw - Math.min(2, bw*.3)), numbered = bw >= 9;
+  let g = moneyGrid(max, y, L, W-R);
+  ps.forEach((p,i) => { const x = L + i*bw, top = i < 5;
+    g += `<g class="pbar" data-prod="${esc(p.key)}"><title>${esc(p.label)}: ${esc(money(p.v))}</title>`
+      + `<rect class="hit" x="${x}" y="${T}" width="${bw}" height="${H-T-B}"/>`
+      + `<rect class="bar${top?" sel":""}" x="${x+(bw-w)/2}" y="${y(p.v)}" width="${w}" height="${Math.max(0,(H-B)-y(p.v))}" rx="${Math.min(2,w/2)}"/>`
+      + (top && numbered ? `<text x="${x+bw/2}" y="${y(p.v)-4}" text-anchor="middle">${i+1}</text>` : "") + `</g>`; });
+  if (!numbered) g += `<text x="${L + 2.5*bw}" y="${y(ps[0].v)-4}" text-anchor="middle">top 5</text>`;
+  g += `<line class="avg" x1="${L}" x2="${W-R}" y1="${y(even)}" y2="${y(even)}"/><text x="${W-R}" y="${y(even)-4}" text-anchor="end">even split ${esc(money(even,0))}</text>`;
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Spending per product, largest first, ${n} products">${g}</svg>`;
+}
 function paretoSection(A){
-  const ps = Object.values(A.products).filter(P => !PARETO_OUT.includes(P.category) && P.total > 0).sort((a,b) => b.total - a.total);
-  if (ps.length < 6) return "";
-  const tot = sum(ps.map(P => P.total)), top = ps.slice(0,5), topShare = sum(top.map(P => P.total))/tot;
+  const mk = S.month, M = A.months[mk], label = mkLabel(mk, true);
+  const ps = Object.entries(M ? M.prods : {}).map(([k,v]) => ({key:k, v, label:A.products[k]?.label || k, cat:A.products[k]?.category}))
+    .filter(p => !PARETO_OUT.includes(p.cat) && p.v > 0).sort((a,b) => b.v - a.v);
+  const head = `<div class="section pareto"><div class="section-head"><h2>Where most of your money goes</h2><span class="small muted">${esc(label)}</span></div>`;
+  if (ps.length < 6) return `${head}<div class="empty">Appears once you've bought at least 6 different products in ${esc(label)}.</div></div>`;
+  const tot = sum(ps.map(p => p.v)), top = ps.slice(0,5), topTot = sum(top.map(p => p.v)), topShare = topTot/tot;
+  const ratio = topShare / (5/ps.length), rest = ps.length - 5;
+  // ratio = top 5's share compared with what an even split would give them (5 of n products)
+  const verdict = `An even split would give them ${(500/ps.length).toFixed(0)}%. ` + (
+    ratio >= 1.6 ? "A few products take most of the money, so saving on these first has the biggest effect."
+    : ratio >= 1.25 ? "These are a good place to start, but the other products add up too."
+    : "Your spending is spread evenly, so no product stands out: look at whole categories or shops instead.");
   let cum = 0;
-  const rows = top.map(P => { const sh = P.total/tot; cum += sh;
-    return `<button class="pareto-row" data-prod="${esc(P.key)}"><span class="pn">${esc(P.label)}</span><span class="num">${money(P.total)} · ${(sh*100).toFixed(0)}%</span><span class="meter"><i style="width:${(sh*100).toFixed(1)}%"></i></span><span class="small muted cum">${(cum*100).toFixed(0)}% together</span></button>`; }).join("");
-  return `<div class="section pareto"><div class="section-head"><h2>Where most of your money goes</h2></div>
-    <p class="pace-lead">Your top 5 products are <b>${(topShare*100).toFixed(0)}%</b> of your shopping, out of ${ps.length} products you've bought. Small savings on these matter most.</p>
-    <div class="ledger">${rows}<div class="pareto-rest"><span>Other ${ps.length-5} products</span><span class="num">${money(tot - sum(top.map(P => P.total)))} · ${((1-topShare)*100).toFixed(0)}%</span></div></div>
-    <p class="small muted chart-note">All your receipts so far. Left out: ${esc(catList(PARETO_OUT))}. These are services and fixed costs rather than products, so they would hide the rest. Bars show each product's share of the total.</p></div>`;
+  const rows = top.map((p,i) => { const sh = p.v/tot; cum += sh;
+    return `<button class="pareto-row" data-prod="${esc(p.key)}"><span class="pn">${i+1}. ${esc(p.label)}</span><span class="num">${money(p.v)} · ${(sh*100).toFixed(0)}%</span><span class="meter"><i style="width:${(sh*100).toFixed(1)}%"></i></span><span class="small muted cum">${(cum*100).toFixed(0)}% together</span></button>`; }).join("");
+  return `${head}
+    <p class="pace-lead">Your top 5 products are <b>${(topShare*100).toFixed(0)}%</b> of your shopping in ${esc(label)}, out of ${ps.length} products. ${verdict}</p>
+    ${paretoChart(ps, tot)}
+    <p class="small muted chart-note">Each bar is one product, largest on the left. Dashed line: what each product would cost if the month's spending were split evenly. Tap a bar to see the product.</p>
+    <div class="ledger">${rows}<div class="pareto-rest"><span>Other ${rest} product${plural(rest)}, about ${money((tot-topTot)/rest)} each</span><span class="num">${money(tot - topTot)} · ${((1-topShare)*100).toFixed(0)}%</span></div></div>
+    <p class="small muted chart-note">The month you picked on Overview. Left out: ${esc(catList(PARETO_OUT))}. These are services and fixed costs rather than products, so they would hide the rest.</p></div>`;
 }
 
 function viewHome(A, list){

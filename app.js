@@ -147,13 +147,15 @@ function analyze(list){
     P.share = mks.length ? P.monthsBought / mks.length : 0;
     P.perMonth = P.buys.length / Math.max(1, mks.length);
   }
-  // price premium: what you paid above the cheapest price you ever paid for the same product (compared per unit)
+  // price premium: what you paid above the cheapest price you paid for the same product in the same month
+  // (compared per unit). Staying within one month keeps inflation from counting as a premium.
   let premium = 0;
   for (const P of Object.values(products)){
     P.premium = 0; if (P.category === "housing" || P.buys.length < 2) continue;
-    const lo = {}; P.buys.forEach(b => { lo[b.unit] = Math.min(lo[b.unit] ?? Infinity, b.unitPrice); });
+    const lo = {}, k = b => b.mk + "|" + b.unit;
+    P.buys.forEach(b => { lo[k(b)] = Math.min(lo[k(b)] ?? Infinity, b.unitPrice); });
     for (const b of P.buys){
-      const p = (b.unitPrice - lo[b.unit]) * b.qty; if (!(p >= 0.005)) continue;
+      const p = (b.unitPrice - lo[k(b)]) * b.qty; if (!(p >= 0.005)) continue;
       const M = months[b.mk]; P.premium += p; premium += p; M.premium += p;
       M.premCats[b.cat] = (M.premCats[b.cat]||0) + p; M.premProds[P.key] = (M.premProds[P.key]||0) + p;
     }
@@ -361,7 +363,7 @@ function viewHome(A, list){
   <div class="section"><h2>Month by month</h2>${barChart(A, mk)}<span class="small muted chart-note">Bars: monthly totals. Dashed line: your monthly average. Includes every category, rent and bills too.</span></div>
   <div class="premium">
     <div class="premium-head"><span class="label">Price premium · ${esc(mkLabel(mk,true))}</span><span class="v num">${money(M.premium)}</span></div>
-    <span class="small muted">${A.premium ? `What you'd have saved by always paying your lowest price for products you bought more than once. All time: <b class="num">${money(A.premium)}</b>. Left out: ${esc(CAT.housing)}, and products you bought only once.` : "Appears once you've bought the same product at different prices."}</span>
+    <span class="small muted">${A.premium ? `What you'd have saved by always paying your lowest price for products you bought more than once. All time: <b class="num">${money(A.premium)}</b>. Left out: ${esc(CAT.housing)}, and products you bought only once.<br>Each purchase is compared with the lowest price you paid for the same product in the same month, so price rises over time (inflation) don't count as a premium.` : "Appears once you've bought the same product at different prices in the same month."}</span>
   </div>
   <div class="section">
     <div class="section-head"><h2>Spending per category</h2></div>

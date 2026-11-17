@@ -40,7 +40,6 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{ou
 
 .top{display:flex; align-items:center; justify-content:space-between; gap:12px}
 .brand{display:flex; align-items:center; gap:10px}
-.top-actions{display:flex; align-items:center; gap:2px}
 .brand svg{width:34px; height:34px; flex:none}
 .brand b{font-family:var(--display); font-size:1.3rem; font-weight:700; letter-spacing:.01em}
 .brand img,.brand svg{width:34px; height:34px; flex:none}
@@ -74,8 +73,6 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{ou
 .chart .grid{stroke:var(--line); stroke-width:1}
 .chart .bar{fill:var(--taupe); opacity:.28}
 .chart .bar.sel{opacity:1}
-.chart .hit{fill:transparent; cursor:pointer}
-.chart .pbar:hover .bar{opacity:.5} .chart .pbar:hover .bar.sel{opacity:.75}
 .chart .avg{stroke:var(--slate); stroke-width:1.5; stroke-dasharray:4 3; fill:none}
 .chart .line{stroke:var(--taupe); stroke-width:2; fill:none}
 .chart .area{fill:var(--taupe); opacity:.12}
@@ -98,8 +95,6 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{ou
 .card{background:var(--paper); border:1px solid var(--line); border-radius:16px; padding:14px}
 .soon{display:flex; flex-direction:column; gap:6px; border-style:dashed}
 .tag{display:inline-block; font-size:.68rem; letter-spacing:.08em; text-transform:uppercase; padding:2px 8px; border-radius:999px; background:var(--mint); color:var(--mint-ink); font-weight:600}
-/* highlighter for an important sentence, in the app's light blue */
-mark.hl{background:var(--mint); color:var(--mint-ink); border-radius:4px; padding:1px 4px; -webkit-box-decoration-break:clone; box-decoration-break:clone}
 .tag.scan{background:var(--mint)} .tag.manual{background:var(--line); color:var(--ink)}
 
 .prod{display:grid; grid-template-columns:1fr auto; gap:2px 12px; padding:12px 2px; border-bottom:1px solid var(--line); width:100%; background:none; border-left:0;border-right:0;border-top:0; text-align:left}
@@ -230,3 +225,14 @@ altcha-widget{display:block;
   --altcha-color-base:var(--paper); --altcha-color-base-content:var(--ink); --altcha-border-color:var(--line);
   --altcha-border-radius:10px; --altcha-color-primary:var(--taupe); --altcha-color-primary-content:var(--taupe-ink);
   --altcha-max-width:100%}
+
+/* spending type progress */
+.type-progress{display:grid; grid-template-columns:70px 1fr; gap:14px; align-items:center; margin:4px 0 20px}
+.card-back{width:70px; height:auto; display:block; transform:rotate(-4deg); filter:drop-shadow(0 3px 6px rgba(14,54,75,.18))}
+.tp-body{display:flex; flex-direction:column; gap:6px; min-width:0}
+.tp-count{font-family:var(--display); font-size:1.05rem}
+.tp-count b{font-size:1.4rem}
+.pips{display:grid; grid-template-columns:repeat(20,1fr); gap:3px}
+.pips i{height:8px; border-radius:2px; background:var(--line)}
+.pips i.on{background:var(--taupe)}
+@media (prefers-reduced-motion:no-preference){ .pips i{transition:background .3s} }

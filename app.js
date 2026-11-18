@@ -147,13 +147,15 @@ function analyze(list){
     P.share = mks.length ? P.monthsBought / mks.length : 0;
     P.perMonth = P.buys.length / Math.max(1, mks.length);
   }
-  // price premium: what you paid above the cheapest price you ever paid for the same product (compared per unit)
+  // price premium: what you paid above the cheapest price you paid for the same product in the same month
+  // (compared per unit). Staying within one month keeps inflation from counting as a premium.
   let premium = 0;
   for (const P of Object.values(products)){
     P.premium = 0; if (P.category === "housing" || P.buys.length < 2) continue;
-    const lo = {}; P.buys.forEach(b => { lo[b.unit] = Math.min(lo[b.unit] ?? Infinity, b.unitPrice); });
+    const lo = {}, k = b => b.mk + "|" + b.unit;
+    P.buys.forEach(b => { lo[k(b)] = Math.min(lo[k(b)] ?? Infinity, b.unitPrice); });
     for (const b of P.buys){
-      const p = (b.unitPrice - lo[b.unit]) * b.qty; if (!(p >= 0.005)) continue;
+      const p = (b.unitPrice - lo[k(b)]) * b.qty; if (!(p >= 0.005)) continue;
       const M = months[b.mk]; P.premium += p; premium += p; M.premium += p;
       M.premCats[b.cat] = (M.premCats[b.cat]||0) + p; M.premProds[P.key] = (M.premProds[P.key]||0) + p;
     }
@@ -315,17 +317,44 @@ function paceSection(A, list, mk){
     ${paceChart(mk, cur, avg, today)}
     <p class="small muted chart-note">${note}</p></div>`;
 }
+// One bar per product, largest on the left. The dashed line is what each product would cost if the month's
+// spending were split evenly, so the shape shows at a glance whether a few products dominate.
+function paretoChart(ps, tot){
+  const W=340,H=170,L=40,B=8,T=16,R=6, n = ps.length, even = tot/n;
+  const max = niceMax(ps[0].v), y = v => T + (H-T-B)*(1 - v/max), bw = (W-L-R)/n;
+  const w = Math.max(1, bw - Math.min(2, bw*.3)), numbered = bw >= 9;
+  let g = moneyGrid(max, y, L, W-R);
+  ps.forEach((p,i) => { const x = L + i*bw, top = i < 5;
+    g += `<g class="pbar" data-prod="${esc(p.key)}"><title>${esc(p.label)}: ${esc(money(p.v))}</title>`
+      + `<rect class="hit" x="${x}" y="${T}" width="${bw}" height="${H-T-B}"/>`
+      + `<rect class="bar${top?" sel":""}" x="${x+(bw-w)/2}" y="${y(p.v)}" width="${w}" height="${Math.max(0,(H-B)-y(p.v))}" rx="${Math.min(2,w/2)}"/>`
+      + (top && numbered ? `<text x="${x+bw/2}" y="${y(p.v)-4}" text-anchor="middle">${i+1}</text>` : "") + `</g>`; });
+  if (!numbered) g += `<text x="${L + 2.5*bw}" y="${y(ps[0].v)-4}" text-anchor="middle">top 5</text>`;
+  g += `<line class="avg" x1="${L}" x2="${W-R}" y1="${y(even)}" y2="${y(even)}"/><text x="${W-R}" y="${y(even)-4}" text-anchor="end">even split ${esc(money(even,0))}</text>`;
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Spending per product, largest first, ${n} products">${g}</svg>`;
+}
 function paretoSection(A){
-  const ps = Object.values(A.products).filter(P => !PARETO_OUT.includes(P.category) && P.total > 0).sort((a,b) => b.total - a.total);
-  if (ps.length < 6) return "";
-  const tot = sum(ps.map(P => P.total)), top = ps.slice(0,5), topShare = sum(top.map(P => P.total))/tot;
+  const mk = S.month, M = A.months[mk], label = mkLabel(mk, true);
+  const ps = Object.entries(M ? M.prods : {}).map(([k,v]) => ({key:k, v, label:A.products[k]?.label || k, cat:A.products[k]?.category}))
+    .filter(p => !PARETO_OUT.includes(p.cat) && p.v > 0).sort((a,b) => b.v - a.v);
+  const head = `<div class="section pareto"><div class="section-head"><h2>Where most of your money goes</h2><span class="small muted">${esc(label)}</span></div>`;
+  if (ps.length < 6) return `${head}<div class="empty">Appears once you've bought at least 6 different products in ${esc(label)}.</div></div>`;
+  const tot = sum(ps.map(p => p.v)), top = ps.slice(0,5), topTot = sum(top.map(p => p.v)), topShare = topTot/tot;
+  const ratio = topShare / (5/ps.length), rest = ps.length - 5;
+  // ratio = top 5's share compared with what an even split would give them (5 of n products)
+  const verdict = `An even split would give them ${(500/ps.length).toFixed(0)}%. ` + (
+    ratio >= 1.6 ? "A few products take most of the money, so saving on these first has the biggest effect."
+    : ratio >= 1.25 ? "These are a good place to start, but the other products add up too."
+    : "Your spending is spread evenly, so no product stands out: look at whole categories or shops instead.");
   let cum = 0;
-  const rows = top.map(P => { const sh = P.total/tot; cum += sh;
-    return `<button class="pareto-row" data-prod="${esc(P.key)}"><span class="pn">${esc(P.label)}</span><span class="num">${money(P.total)} · ${(sh*100).toFixed(0)}%</span><span class="meter"><i style="width:${(sh*100).toFixed(1)}%"></i></span><span class="small muted cum">${(cum*100).toFixed(0)}% together</span></button>`; }).join("");
-  return `<div class="section pareto"><div class="section-head"><h2>Where most of your money goes</h2></div>
-    <p class="pace-lead">Your top 5 products are <b>${(topShare*100).toFixed(0)}%</b> of your shopping, out of ${ps.length} products you've bought. Small savings on these matter most.</p>
-    <div class="ledger">${rows}<div class="pareto-rest"><span>Other ${ps.length-5} products</span><span class="num">${money(tot - sum(top.map(P => P.total)))} · ${((1-topShare)*100).toFixed(0)}%</span></div></div>
-    <p class="small muted chart-note">All your receipts so far. Left out: ${esc(catList(PARETO_OUT))}. These are services and fixed costs rather than products, so they would hide the rest. Bars show each product's share of the total.</p></div>`;
+  const rows = top.map((p,i) => { const sh = p.v/tot; cum += sh;
+    return `<button class="pareto-row" data-prod="${esc(p.key)}"><span class="pn">${i+1}. ${esc(p.label)}</span><span class="num">${money(p.v)} · ${(sh*100).toFixed(0)}%</span><span class="meter"><i style="width:${(sh*100).toFixed(1)}%"></i></span><span class="small muted cum">${(cum*100).toFixed(0)}% together</span></button>`; }).join("");
+  return `${head}
+    <p class="pace-lead">Your top 5 products are <b>${(topShare*100).toFixed(0)}%</b> of your shopping in ${esc(label)}, out of ${ps.length} products. ${verdict}</p>
+    ${paretoChart(ps, tot)}
+    <p class="small muted chart-note">Each bar is one product, largest on the left. Dashed line: what each product would cost if the month's spending were split evenly. Tap a bar to see the product.</p>
+    <div class="ledger">${rows}<div class="pareto-rest"><span>Other ${rest} product${plural(rest)}, about ${money((tot-topTot)/rest)} each</span><span class="num">${money(tot - topTot)} · ${((1-topShare)*100).toFixed(0)}%</span></div></div>
+    <p class="small muted chart-note">The month you picked on Overview. Left out: ${esc(catList(PARETO_OUT))}. These are services and fixed costs rather than products, so they would hide the rest.</p></div>`;
 }
 
 /* ---------- spending type: progress towards revealing your card ---------- */
@@ -383,7 +412,7 @@ function viewHome(A, list){
   <div class="section"><h2>Month by month</h2>${barChart(A, mk)}<span class="small muted chart-note">Bars: monthly totals. Dashed line: your monthly average. Includes every category, rent and bills too.</span></div>
   <div class="premium">
     <div class="premium-head"><span class="label">Price premium · ${esc(mkLabel(mk,true))}</span><span class="v num">${money(M.premium)}</span></div>
-    <span class="small muted">${A.premium ? `What you'd have saved by always paying your lowest price for products you bought more than once. All time: <b class="num">${money(A.premium)}</b>. Left out: ${esc(CAT.housing)}, and products you bought only once.` : "Appears once you've bought the same product at different prices."}</span>
+    <span class="small muted">${A.premium ? `What you'd have saved by always paying your lowest price for products you bought more than once. All time: <b class="num">${money(A.premium)}</b>. Left out: ${esc(CAT.housing)}, and products you bought only once.<br>Each purchase is compared with the lowest price you paid for the same product in the same month, so price rises over time (inflation) don't count as a premium.` : "Appears once you've bought the same product at different prices in the same month."}</span>
   </div>
   <div class="section">
     <div class="section-head"><h2>Spending per category</h2></div>
@@ -452,7 +481,7 @@ function viewInflation(A){
   <div class="section"><h1>Your inflation</h1><span class="muted small">How much the prices of the things <i>you</i> actually buy have changed. Some categories are left out because their prices can't be compared like for like (see the note under the chart).</span></div>
   <div class="hero"><span class="label">${span>=12?"Last 12 months":`Since ${mkLabel(ref.mk,true)} (${span} mo)`}</span><span class="big num">${pct(ch)}</span>
     ${span<12?`<span class="pill ${annual>0?"up":"down"}">≈ ${pct(annual)} per year at this pace</span>`:""}</div>
-  <div class="section"><span class="label">Price index, ${mkLabel(pts[0].mk)} = 100</span>${lineChart(pts, {base:100, label:"Personal price index"})}<span class="small muted chart-note">Left out: ${esc(catList([...NO_INDEX]))}. Only products bought in at least two different months count. Dashed line: 100, your starting level.</span><p class="small muted chart-note">This index reflects the prices you actually paid, including promotions and where you shopped. For a month-to-month breakdown of price changes for the same product at the same shop, see <button class="linkbtn" data-nav="home">“Why your spending changed” on Home</button>.</p></div>
+  <div class="section"><span class="label">Price index, ${mkLabel(pts[0].mk)} = 100</span>${lineChart(pts, {base:100, label:"Personal price index"})}<span class="small muted chart-note">Left out: ${esc(catList([...NO_INDEX]))}. Only products bought in at least two different months count. Dashed line: 100, your starting level.</span><p class="small muted chart-note"><mark class="hl">This index reflects the prices you actually paid, including promotions and where you shopped.</mark> For a month-to-month breakdown of price changes for the same product at the same shop, see <button class="linkbtn" data-nav="home">“Why your spending changed” on Home</button>.</p></div>
   <div class="section"><h2>Biggest price rises</h2><div class="ledger">${up.map(productRow).join("") || `<div class="empty">No price rises yet.</div>`}</div></div>
   ${down.length?`<div class="section"><h2>Got cheaper</h2><div class="ledger">${down.map(productRow).join("")}</div></div>`:""}
   <div class="section"><h2>By category</h2><table class="mini"><thead><tr><th>Category</th><th>Products</th><th>Change</th></tr></thead><tbody>
@@ -922,6 +951,28 @@ function enterApp(){
   loadData();
 }
  
+/* ---------- light / dark mode ---------- */
+// The choice is remembered on this device only. Until someone picks one, the app follows the phone's setting.
+const LS_THEME = "paragon.theme";
+const systemDark = matchMedia("(prefers-color-scheme: dark)");
+const SUN = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>`;
+const MOON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>`;
+const currentTheme = () => document.documentElement.dataset.theme || (systemDark.matches ? "dark" : "light");
+function applyTheme(){
+  const dark = currentTheme() === "dark";
+  // phone status bar colour follows the app
+  document.querySelectorAll('meta[name="theme-color"]').forEach(m => { m.content = dark ? "#0b2230" : "#f5e9d8"; });
+  // the button shows the mode you'd switch to
+  const b = $("#themeBtn"); b.innerHTML = dark ? SUN : MOON; b.setAttribute("aria-label", dark ? "Switch to light mode" : "Switch to dark mode");
+}
+function toggleTheme(){
+  const next = currentTheme() === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem(LS_THEME, next); } catch(_){}
+  applyTheme();
+}
+systemDark.addEventListener("change", applyTheme);
+
 /* ---------- events ---------- */
 document.addEventListener("click", e => {
   const au = e.target.closest("[data-auth]"); if (au){ showAuth(au.dataset.auth); return; }
@@ -936,6 +987,7 @@ document.addEventListener("click", e => {
   const a = t.dataset.action;
   if (a === "add") sheetAdd();
   else if (a === "settings") sheetSettings();
+  else if (a === "theme") toggleTheme();
   else if (a === "close") closeSheet();
   else if (a === "scan"){ if (S.limit && S.used >= S.limit){ toast(`You've used all ${S.limit} scans this month.`); return; } const fi = $("#fileInput"); fi.value = ""; fi.click(); }
   else if (a === "manual"){ closeSheet(); startEditor({source:"manual", store:"", date:todayISO(), items:[blankItem()]}); }
@@ -969,6 +1021,7 @@ window.addEventListener("hashchange", fromHash);
 
 /* ---------- boot ---------- */
 fromHash();
+applyTheme();
 if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(()=>{});
 if (!sb) showAuth();
 else {

@@ -69,6 +69,11 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{ou
 .more summary{cursor:pointer; text-decoration:underline; text-underline-offset:3px; margin-top:8px; width:max-content}
 .more[open] summary{margin-bottom:10px}
 .more > p{margin:10px 0 0}
+.more > :last-child{margin-bottom:0}
+.section.spaced{margin-bottom:32px}
+.fold-card{margin-top:32px}
+.fold-card summary{cursor:pointer}
+.fold-card summary h3{display:inline; margin:0}
 
 .section{display:flex; flex-direction:column; gap:10px}
 .section-head{display:flex; justify-content:space-between; align-items:baseline; gap:10px}

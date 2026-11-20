@@ -21,7 +21,8 @@ const LS_R = "paragon.receipts.v1", LS_P = "paragon.profile.v1";
 const S = {
   view: "home", month: null, openCat: null, q: "", withFixed: false, rules: [],
   real: [], loaded: false, currency: "EUR", aliases: {},
-  user: null, draft: null, scanCtl: null, used: null, limit: null
+  user: null, draft: null, scanCtl: null, used: null, limit: null,
+  openNotes: new Set()   // fold-out notes the person opened, kept open when the page redraws
 };
  
 /* ---------- helpers ---------- */
@@ -315,7 +316,7 @@ function paceSection(A, list, mk){
     <div class="section-head"><h2>Spending pace</h2><button class="chip" data-action="togglefixed" aria-pressed="${S.withFixed}">${S.withFixed ? "Rent &amp; bills included" : "Rent &amp; bills left out"}</button></div>
     <p class="pace-lead">${lead}</p>
     ${paceChart(mk, cur, avg, today)}
-    <p class="small muted chart-note">${note}</p></div>`;
+    <details class="more chart-note" data-note="pace"${S.openNotes.has("pace")?" open":""}><summary class="small muted">How this is worked out</summary><p class="small muted">${note}</p></details></div>`;
 }
 // One bar per product, largest on the left. The dashed line is what each product would cost if the month's
 // spending were split evenly, so the shape shows at a glance whether a few products dominate.
@@ -403,11 +404,11 @@ function viewHome(A, list){
   </div>
   <div class="stats two">
     <div class="stat"><span class="label">Monthly avg</span><span class="v num">${avg?money(avg,0):"—"}</span></div>
-    <div class="stat"><span class="label">Typical range</span><span class="v num" style="font-size:.95rem;white-space:normal;line-height:1.25">${avg&&s?`${money(Math.max(0,avg-s),0)}–<br>${money(avg+s,0)}`:"—"}</span></div>
+    <div class="stat"><span class="label">Typical range</span><span class="v num" style="font-size:.95rem">${avg&&s?`${money(Math.max(0,avg-s),0)}–${money(avg+s,0)}`:"—"}</span></div>
   </div>
   <div class="stats-note">
     <p class="small muted">${avg?`With this average, you spend <b class="num">${money(avg*12,0)}</b> a year.`:"Averages appear once you have a complete month of receipts."}</p>
-    ${n?`<details class="more"><summary class="small muted">How these are worked out</summary>
+    ${n?`<details class="more" data-note="stats"${S.openNotes.has("stats")?" open":""}><summary class="small muted">How these are worked out</summary>
       <div class="stats two"><div class="stat"><span class="label">Std deviation</span><span class="v num">${s?"± "+money(s,0):"—"}</span></div></div>
       <p class="small muted">Based on ${n} complete month${plural(n)}. The current month, and a first month you only partly tracked, are left out.</p>
       <p class="small muted">Standard deviation shows how much your monthly spending varies from the average, so you can tell whether a month is usual or unusual. The typical range is the average plus or minus one standard deviation.</p>
@@ -418,7 +419,7 @@ function viewHome(A, list){
   <div class="section"><h2>Month by month</h2>${barChart(A, mk)}<span class="small muted chart-note">Bars: monthly totals. Dashed line: your monthly average. Includes every category, rent and bills too.</span></div>
   <div class="premium">
     <div class="premium-head"><span class="label">Paid above your best price · ${esc(mkLabel(mk,true))}</span><span class="v num">${money(M.premium)}</span></div>
-    ${A.premium ? `<details class="more"><summary class="small muted">What this means</summary>
+    ${A.premium ? `<details class="more" data-note="premium"${S.openNotes.has("premium")?" open":""}><summary class="small muted">What this means</summary>
       <p class="small muted">Also called the price premium. What you'd have saved by always paying your lowest price for products you bought more than once. All time: <b class="num">${money(A.premium)}</b>.</p>
       <p class="small muted">Each purchase is compared with the lowest price you paid for the same product in the same month, so price rises over time (inflation) don't count as a premium. Left out: ${esc(CAT.housing)}, and products you bought only once.</p>
     </details>` : `<span class="small muted">Appears once you've bought the same product at different prices in the same month.</span>`}
@@ -1024,6 +1025,7 @@ document.addEventListener("change", async e => {
   if (e.target.id === "fileInput"){ const f = e.target.files?.[0]; if (f) runScan(f); return; }
   if (S.draft && e.target.tagName === "SELECT") onEditorInput(e);
 });
+document.addEventListener("toggle", e => { const k = e.target.dataset?.note; if (k) S.openNotes[e.target.open ? "add" : "delete"](k); }, true);
 document.addEventListener("keydown", e => { if (e.key === "Escape" && $("#sheetRoot").firstChild) closeSheet(); });
 function fromHash(){ const h = location.hash.slice(1); if (Object.hasOwn(VIEWS, h)){ S.view = h; if (S.user) render(); } }
 window.addEventListener("hashchange", fromHash);

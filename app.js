@@ -267,6 +267,7 @@ function render(){
   $("#banner").innerHTML = isDemo()
     ? `<div class="banner"><span>●</span><span><b>Example data.</b> You're looking at 8 made-up months so you can see how MijnParagon works. Scan or add your first receipt and only your own data will show.</span></div>` : "";
   if (!S.loaded){ $("#view").innerHTML = `<div class="empty">Loading your receipts…</div>`; return; }
+  $("#view").dataset.view = S.view;   // lets styles target one tab
   $("#view").innerHTML = (VIEWS[S.view] || viewHome)(A, list);
   const qi = $("#q"); if (qi && S._focusQ){ qi.focus(); qi.setSelectionRange(qi.value.length, qi.value.length); }
 }

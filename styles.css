@@ -269,3 +269,8 @@ altcha-widget{display:block;
 .guide .linkbtn{align-self:flex-start; font-size:.8rem}
 #sec-why,#sec-cats,#sec-premium,#sec-months{scroll-margin-top:16px}
 .decomp-sec,#sec-cats,.top-prods,.pace{margin-bottom:28px}
+
+/* Overview: call-out boxes without outlines, more air around the month total */
+#view[data-view="home"] :is(.stat, .card, .premium){border:0}
+#view[data-view="home"] .hero .big{margin:16px 0 20px}
+#view[data-view="home"] .hero .pill{border:0}

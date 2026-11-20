@@ -401,18 +401,27 @@ function viewHome(A, list){
     <div class="monthbar"><button class="chev" data-month="-1" ${pos<=0?"disabled":""} aria-label="Previous month">‹</button><span class="m">${mkLabel(mk,true)}</span><button class="chev" data-month="1" ${pos>=allM.length-1?"disabled":""} aria-label="Next month">›</button></div>
     <div class="hero"><span class="label">Spent this month</span><span class="big num">${money(M.total)}</span>${vs}<span class="small muted">${M.count} receipt${plural(M.count)}</span></div>
   </div>
-  <div class="stats">
+  <div class="stats two">
     <div class="stat"><span class="label">Monthly avg</span><span class="v num">${avg?money(avg,0):"—"}</span></div>
-    <div class="stat"><span class="label">Std deviation</span><span class="v num">${s?"± "+money(s,0):"—"}</span></div>
     <div class="stat"><span class="label">Typical range</span><span class="v num" style="font-size:.95rem;white-space:normal;line-height:1.25">${avg&&s?`${money(Math.max(0,avg-s),0)}–<br>${money(avg+s,0)}`:"—"}</span></div>
   </div>
-  <p class="small muted stats-note">${n?`Based on ${n} complete month${plural(n)}. The current month, and a first month you only partly tracked, are left out.`:"Averages appear once you have a complete month of receipts."}<br>Standard deviation shows how much your monthly spending varies from the average, so you can tell whether a month is usual or unusual.</p>
+  <div class="stats-note">
+    <p class="small muted">${avg?`With this average, you spend <b class="num">${money(avg*12,0)}</b> a year.`:"Averages appear once you have a complete month of receipts."}</p>
+    ${n?`<details class="more"><summary class="small muted">How these are worked out</summary>
+      <div class="stats two"><div class="stat"><span class="label">Std deviation</span><span class="v num">${s?"± "+money(s,0):"—"}</span></div></div>
+      <p class="small muted">Based on ${n} complete month${plural(n)}. The current month, and a first month you only partly tracked, are left out.</p>
+      <p class="small muted">Standard deviation shows how much your monthly spending varies from the average, so you can tell whether a month is usual or unusual. The typical range is the average plus or minus one standard deviation.</p>
+    </details>`:""}
+  </div>
   ${typeProgressSection()}
   ${paceSection(A, list, mk)}
   <div class="section"><h2>Month by month</h2>${barChart(A, mk)}<span class="small muted chart-note">Bars: monthly totals. Dashed line: your monthly average. Includes every category, rent and bills too.</span></div>
   <div class="premium">
-    <div class="premium-head"><span class="label">Price premium · ${esc(mkLabel(mk,true))}</span><span class="v num">${money(M.premium)}</span></div>
-    <span class="small muted">${A.premium ? `What you'd have saved by always paying your lowest price for products you bought more than once. All time: <b class="num">${money(A.premium)}</b>. Left out: ${esc(CAT.housing)}, and products you bought only once.<br>Each purchase is compared with the lowest price you paid for the same product in the same month, so price rises over time (inflation) don't count as a premium.` : "Appears once you've bought the same product at different prices in the same month."}</span>
+    <div class="premium-head"><span class="label">Paid above your best price · ${esc(mkLabel(mk,true))}</span><span class="v num">${money(M.premium)}</span></div>
+    ${A.premium ? `<details class="more"><summary class="small muted">What this means</summary>
+      <p class="small muted">Also called the price premium. What you'd have saved by always paying your lowest price for products you bought more than once. All time: <b class="num">${money(A.premium)}</b>.</p>
+      <p class="small muted">Each purchase is compared with the lowest price you paid for the same product in the same month, so price rises over time (inflation) don't count as a premium. Left out: ${esc(CAT.housing)}, and products you bought only once.</p>
+    </details>` : `<span class="small muted">Appears once you've bought the same product at different prices in the same month.</span>`}
   </div>
   <div class="section">
     <div class="section-head"><h2>Spending per category</h2></div>

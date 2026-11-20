@@ -254,3 +254,18 @@ altcha-widget{display:block;
 .pips i{height:8px; border-radius:2px; background:var(--line)}
 .pips i.on{background:var(--taupe)}
 @media (prefers-reduced-motion:no-preference){ .pips i{transition:background .3s} }
+
+/* Overview: conclusions and the question guide */
+.takeaway{margin:4px 0 0; padding-left:10px; border-left:3px solid var(--taupe); font-size:.92rem; line-height:1.45}
+.bridge{margin:0}
+.guide{display:flex; flex-direction:column; gap:10px; margin:4px 0 28px}
+.guide h2{margin:0}
+.guide p{margin:0}
+.guide ol{margin:0; padding-left:1.3em; display:flex; flex-direction:column; gap:12px}
+.guide li{display:flex; flex-direction:column; gap:2px}
+.guide li::marker{color:var(--muted); font-weight:600}
+.gq{font-weight:600}
+.ga{font-size:.92rem; line-height:1.45}
+.guide .linkbtn{align-self:flex-start; font-size:.8rem}
+#sec-why,#sec-cats,#sec-premium,#sec-months{scroll-margin-top:16px}
+.decomp-sec,#sec-cats,.top-prods,.pace{margin-bottom:28px}

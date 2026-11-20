@@ -316,6 +316,7 @@ function paceSection(A, list, mk){
     <div class="section-head"><h2>Spending pace</h2><button class="chip" data-action="togglefixed" aria-pressed="${S.withFixed}">${S.withFixed ? "Rent &amp; bills included" : "Rent &amp; bills left out"}</button></div>
     <p class="pace-lead">${lead}</p>
     ${paceChart(mk, cur, avg, today)}
+    <p class="small muted bridge">Pace shows how this month builds up day by day. Month by month, below, shows whether it's part of a longer trend.</p>
     <details class="more chart-note" data-note="pace"${S.openNotes.has("pace")?" open":""}><summary class="small muted">How this is worked out</summary><p class="small muted">${note}</p></details></div>`;
 }
 // One bar per product, largest on the left. The dashed line is what each product would cost if the month's
@@ -379,6 +380,127 @@ function typeProgressSection(){
     </div></div>`;
 }
 
+/* ---------- Overview: conclusions ----------
+   One place that turns the numbers into answers. The guide at the top of Overview asks the questions in the
+   order you'd think them through (is it unusual → is it a trend → prices or habits → where → paying too much),
+   and each section repeats its own answer under the chart, so the two always agree. */
+const amt0 = v => `${v >= 0 ? "+" : "−"}${money(Math.abs(v),0)}`;
+function homeInsights(A, list, mk, D){
+  const M = A.months[mk] || {total:0, cats:{}, prods:{}, premium:0, premProds:{}};
+  const isCur = mk === A.curMk, {avg, sd: s} = A.stats, I = {};
+  const base = A.completeMks.filter(m => m !== mk);
+
+  // 1. is this month unusual? The running month is projected to its end at your usual pace.
+  if (avg){
+    let val = M.total, est = false;
+    if (isCur && base.length){
+      const n = daysIn(mk), today = Math.min(n, +todayISO().slice(8,10)), cur = cumDays(list, mk, true), arrs = base.map(m => cumDays(list, m, true));
+      const av = d => mean(arrs.map(x => x[d])); val = cur[today] + av(n) - av(today); est = true;
+    }
+    const lo = Math.max(0, avg - (s||0)), hi = avg + (s||0), range = s ? `your usual range (${money(lo,0)}–${money(hi,0)})` : `your average (${money(avg,0)})`;
+    const what = est ? `you're on track for about <b class="num">${money(val,0)}</b>` : `you spent <b class="num">${money(val,0)}</b>`;
+    I.unusual = val > hi + 0.5 ? `${est ? "Likely yes" : "Yes"}: ${what}, ${money(val - hi,0)} above ${range}.`
+      : val < lo - 0.5 ? `No: ${what}, below ${range}.`
+      : `No: ${what}, ${s ? "within" : "close to"} ${range}.`;
+    I.over = val > hi + 0.5;
+  }
+
+  // 2. one-off or trend? last 3 complete months against the 3 before (or against your average)
+  const cm = A.completeMks, tot = m => A.months[m].total;
+  if (cm.length >= 3){
+    const last = mean(cm.slice(-3).map(tot)), prev = cm.length >= 6 ? mean(cm.slice(-6,-3).map(tot)) : avg, ch = prev ? last/prev - 1 : 0;
+    const vs = cm.length >= 6 ? "the 3 before" : "your overall average";
+    I.trend = Math.abs(ch) < .05 ? `Steady: your last 3 complete months averaged <b class="num">${money(last,0)}</b>, about the same as ${vs}.`
+      : ch > 0 ? `Creeping up: your last 3 complete months averaged <b class="num">${money(last,0)}</b>, <b class="chg up">${pct(ch,0)}</b> vs. ${vs}. That points to a change in habits or prices, not a one-off.`
+      : `Going down: your last 3 complete months averaged <b class="num">${money(last,0)}</b>, <b class="chg down">${pct(ch,0)}</b> vs. ${vs}.`;
+  }
+
+  // 3. prices, shops or habits? (this month vs. the previous one)
+  if (D.e0){
+    const since = isCur ? `the same days of ${mkLabel(D.prevMk,true)}` : mkLabel(D.prevMk,true);
+    const parts = [["prices", D.infl], ["shops", D.stores], ["habits", D.habits]];
+    const main = parts.reduce((x,y) => Math.abs(y[1]) > Math.abs(x[1]) ? y : x);
+    const expl = {prices: `price changes (the same products at the same shops cost ${main[1] >= 0 ? "more" : "less"})`,
+      shops: `where you shop (the same products bought at ${main[1] >= 0 ? "pricier" : "cheaper"} places)`,
+      habits: `your habits (buying ${main[1] >= 0 ? "more or different" : "less or different"} things)`}[main[0]];
+    I.mainCause = main[0]; I.mainVal = main[1];
+    I.top = D.drivers?.[0] && Math.abs(D.drivers[0].change) >= 1 ? D.drivers[0] : null;
+    I.why = Math.abs(D.change) < 1 ? `About the same as ${esc(since)}.`
+      : `<b class="chg ${D.change > 0 ? "up" : "down"}">${amt0(D.change)}</b> vs. ${esc(since)}. The biggest part is ${expl}: ${amt0(main[1])}.`;
+    I.topTxt = I.top ? `Biggest single change: <b style="text-transform:capitalize">${esc(I.top.l)}</b> <span class="chg ${chgClass(I.top.change)}">${amt0(I.top.change)}</span>.` : "";
+  }
+  const PI = priceIndex(A);
+  if (PI.count && PI.pts.length >= 2){
+    const pts = PI.pts, ref = pts[Math.max(0, pts.length-13)], ch = pts[pts.length-1].v/ref.v - 1;
+    I.infl = `Since ${mkLabel(ref.mk,true)}, the prices of what you buy ${ch >= 0 ? "rose" : "fell"} ${(Math.abs(ch)*100).toFixed(1)}%.`;
+  }
+
+  // 4. where does the money go? Everyday costs separately from rent and bills, which you can't change month to month.
+  const flex = Object.entries(M.cats).filter(([c,v]) => !FIXED_COSTS.includes(c) && v > 0).sort((x,y) => y[1] - x[1]);
+  const flexTot = sum(flex.map(e => e[1])), fixed = M.total - flexTot;
+  if (flex.length){
+    const [c, v] = flex[0];
+    I.topCat = c;
+    let riser = null;
+    if (!isCur && base.length){
+      riser = flex.map(([k,val]) => [k, val - mean(base.map(m => A.months[m].cats[k] || 0))]).sort((x,y) => y[1] - x[1])[0];
+      if (riser[1] < 5) riser = null;
+    }
+    I.where = `<b>${esc(CAT[c])}</b> is your biggest everyday cost: <b class="num">${money(v,0)}</b>, ${(v/flexTot*100).toFixed(0)}% of what you spent outside rent and bills.`
+      + (riser ? ` <b>${esc(CAT[riser[0]])}</b> grew most: ${money(riser[1],0)} above its usual month.` : "");
+    I.fixedTxt = fixed >= 1 ? `${esc(catList(FIXED_COSTS))}: ${money(fixed,0)}. These are fixed costs, so they change only when you change a contract.` : "";
+  }
+
+  // 5. paying more than you need to?
+  if (M.premium >= 0.5){
+    // services (two restaurants, two haircuts) differ by design, so they're named separately from products
+    const ranked = Object.entries(M.premProds).sort((x,y) => y[1] - x[1]);
+    const isProd = k => !PARETO_OUT.includes(A.products[k]?.category), lbl = k => esc(A.products[k]?.label || k);
+    const [tk, tv] = ranked[0], prod = ranked.find(([k]) => isProd(k));
+    const bestAt = k => A.products[k]?.buys.filter(b => b.mk === mk && b.store).sort((x,y) => x.unitPrice - y.unitPrice)[0]?.store;
+    const prodTxt = ([k, v]) => `<b style="text-transform:capitalize">${lbl(k)}</b> (${money(v)})${bestAt(k) ? `, cheapest at ${esc(bestAt(k))}` : ""}`;
+    if (prod){ I.premK = prod[0]; I.premV = prod[1]; I.premIsProduct = true; }
+    I.premium = `Yes: <b class="num">${money(M.premium)}</b> above your best prices this month. `
+      + (isProd(tk) ? `Most of it is ${prodTxt(ranked[0])}.`
+        : `Most of it is <b style="text-transform:capitalize">${lbl(tk)}</b> (${money(tv)}), which compares different places, so it isn't really overpaying.`
+          + (prod && prod[1] >= 0.5 ? ` Among products, the biggest is ${prodTxt(prod)}.` : ""));
+  } else I.premium = A.premium ? "No: this month you paid your best price each time." : "Not measurable yet: it needs the same product bought more than once in a month.";
+
+  // where to start: the single most useful thing to look at
+  const flexTop = I.topCat ? `<b>${esc(CAT[I.topCat])}</b>, your biggest everyday cost: small changes there go furthest.` : "";
+  let start = "";
+  if (I.mainCause === "habits" && I.mainVal > 0 && I.top && I.top.change > 0)
+    start = `<b style="text-transform:capitalize">${esc(I.top.l)}</b>: it changed the most. Buying it less often, or swapping it for something cheaper, has the biggest effect.`;
+  else if (I.mainCause === "shops" && I.mainVal > 0)
+    start = `Where you shop: you paid more for the same products at other places. Open a product to see where you paid least.`;
+  else if (I.mainCause === "prices" && I.mainVal > 0)
+    start = `Rising prices. See the <button class="linkbtn" data-nav="inflation">Inflation</button> tab for the products that rose most, and look for alternatives to those.`;
+  else if (I.premIsProduct && I.premV >= 5)
+    start = `<b style="text-transform:capitalize">${esc(A.products[I.premK]?.label || I.premK)}</b>: buy it where you got it cheapest. That saves money without buying less.`;
+  else start = flexTop;
+  I.start = start ? (I.over === false ? `This month is not above usual. If you want to save more anyway, start with ${start}` : `Start with ${start}`) : "";
+  return I;
+}
+
+function guideSection(I){
+  const step = (q, ans, jump, label) => ans ? `<li><span class="gq">${q}</span><span class="ga">${ans}</span>${jump ? `<button class="linkbtn" data-jump="${jump}">${label}</button>` : ""}</li>` : "";
+  const steps = [
+    step("Is this month unusual?", I.unusual, "sec-months", "See month by month"),
+    step("Is it a one-off or a trend?", I.trend, "sec-months", "See month by month"),
+    step("Prices, shops or habits?", I.why ? I.why + (I.infl ? ` ${I.infl}` : "") : "", "sec-why", "See why your spending changed"),
+    step("Where does the money go?", I.where, "sec-cats", "See spending per category"),
+    step("Paying more than you need to?", I.premium, "sec-premium", "See paid above your best price"),
+  ].join("");
+  if (!steps) return "";
+  return `<div class="card guide" role="group" aria-label="What's behind this month">
+    <h2>What's behind this month</h2>
+    <p class="small muted">Five questions, in the order worth asking them. Each answer comes from a section further down.</p>
+    <ol>${steps}</ol>
+    ${I.start ? `<p class="takeaway">${I.start}</p>` : ""}
+    <p class="small muted">MijnParagon doesn't see your income. If you earn more than before, spending more can be a choice rather than a problem. Compare these numbers with what you want to save.</p>
+  </div>`;
+}
+
 function viewHome(A, list){
   const mk = S.month, M = A.months[mk] || {total:0, cats:{}, prods:{}, count:0, premium:0, premCats:{}, premProds:{}};
   const allM = monthList(A);
@@ -397,6 +519,8 @@ function viewHome(A, list){
     return `<button class="row" data-cat="${c}" aria-expanded="${open}"><span class="chev-r">›</span><span class="name">${esc(CAT[c])}</span><span class="amt">${money(v)}${M.premCats[c]?`<small class="prem">premium ${money(M.premCats[c])}</small>`:""}</span><span class="meter"><i style="width:${(v/top*100).toFixed(1)}%"></i></span></button>${sub}`;
   }).join("");
   const prods = Object.entries(M.prods).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const topFlex = Object.entries(M.prods).filter(([k]) => !PARETO_OUT.includes(A.products[k]?.category)).sort((a,b)=>b[1]-a[1])[0];
+  const D = decompose(list, mk, A.curMk), I = homeInsights(A, list, mk, D);
   return `
   <div class="section">
     <div class="monthbar"><button class="chev" data-month="-1" ${pos<=0?"disabled":""} aria-label="Previous month">‹</button><span class="m">${mkLabel(mk,true)}</span><button class="chev" data-month="1" ${pos>=allM.length-1?"disabled":""} aria-label="Next month">›</button></div>
@@ -414,27 +538,36 @@ function viewHome(A, list){
       <p class="small muted">Standard deviation shows how much your monthly spending varies from the average, so you can tell whether a month is usual or unusual. The typical range is the average plus or minus one standard deviation.</p>
     </details>`:""}
   </div>
-  ${typeProgressSection()}
-  ${paceSection(A, list, mk)}
-  <div class="section"><h2>Month by month</h2>${barChart(A, mk)}<span class="small muted chart-note">Bars: monthly totals. Dashed line: your monthly average. Includes every category, rent and bills too.</span></div>
-  <div class="premium">
+  ${guideSection(I)}
+  ${decompSection(A, list, mk, D, I)}
+  <div class="section" id="sec-cats">
+    <div class="section-head"><h2>Spending per category</h2></div>
+    ${cats.length ? `<div class="ledger">${rowsHtml}</div>` : `<div class="empty">No expenses in ${mkLabel(mk,true)} yet.</div>`}
+    ${I.where ? `<p class="takeaway">${I.where}</p>` : ""}
+    ${I.fixedTxt ? `<p class="small muted bridge">${I.fixedTxt}</p>` : ""}
+    <p class="small muted bridge">Tap a category to see its products. Top products, below, shows the single products that cost the most.</p>
+  </div>
+  ${prods.length ? `<div class="section top-prods"><div class="section-head"><h2>Top products</h2><button class="linkbtn" data-nav="products">All products</button></div>
+    <table class="mini"><tbody>${prods.map(([k,v])=>`<tr><td style="text-transform:capitalize">${esc(A.products[k]?.label||k)}</td><td>${money(v)}</td></tr>`).join("")}</tbody></table>
+    ${topFlex ? `<p class="takeaway"><b style="text-transform:capitalize">${esc(A.products[topFlex[0]]?.label || topFlex[0])}</b> is your biggest everyday product this month (${money(topFlex[1])}). A small change in how often or where you buy it goes a long way.</p>` : ""}
+    <p class="small muted bridge">For every product ranked by what it costs you, see <button class="linkbtn" data-nav="products">Where most of your money goes</button> on Products.</p></div>`:""}
+  <div class="premium" id="sec-premium">
     <div class="premium-head"><span class="label">Paid above your best price · ${esc(mkLabel(mk,true))}</span><span class="v num">${money(M.premium)}</span></div>
+    <p class="takeaway">${I.premium}</p>
     ${A.premium ? `<details class="more" data-note="premium"${S.openNotes.has("premium")?" open":""}><summary class="small muted">What this means</summary>
       <p class="small muted">Also called the price premium. What you'd have saved by always paying your lowest price for products you bought more than once. All time: <b class="num">${money(A.premium)}</b>.</p>
       <p class="small muted">Each purchase is compared with the lowest price you paid for the same product in the same month, so price rises over time (inflation) don't count as a premium. Left out: ${esc(CAT.housing)}, and products you bought only once.</p>
     </details>` : `<span class="small muted">Appears once you've bought the same product at different prices in the same month.</span>`}
   </div>
-  <div class="section">
-    <div class="section-head"><h2>Spending per category</h2></div>
-    ${cats.length ? `<div class="ledger">${rowsHtml}</div>` : `<div class="empty">No expenses in ${mkLabel(mk,true)} yet.</div>`}
-  </div>
-  ${prods.length ? `<div class="section top-prods"><div class="section-head"><h2>Top products</h2><button class="linkbtn" data-nav="products">All products</button></div>
-    <table class="mini"><tbody>${prods.map(([k,v])=>`<tr><td style="text-transform:capitalize">${esc(A.products[k]?.label||k)}</td><td>${money(v)}</td></tr>`).join("")}</tbody></table></div>`:""}
-  ${decompSection(A, list, mk)}`;
+  ${paceSection(A, list, mk)}
+  <div class="section" id="sec-months"><h2>Month by month</h2>${barChart(A, mk)}
+    ${I.trend ? `<p class="takeaway">${I.trend}</p>` : ""}
+    <span class="small muted chart-note">Bars: monthly totals. Dashed line: your monthly average. Includes every category, rent and bills too.</span></div>
+  ${typeProgressSection()}`;
 }
 
-function decompSection(A, list, mk){
-  const D = decompose(list, mk, A.curMk), sofar = mk === A.curMk;
+function decompSection(A, list, mk, D, I){
+  const sofar = mk === A.curMk;
   const pctS = v => Math.abs(v) < .005 ? "0%" : pct(v,0);
   const prevL = mkLabel(D.prevMk, true), base = sofar ? `the same days of ${prevL} (1–${D.cut})` : prevL;
   let body;
@@ -451,7 +584,9 @@ function decompSection(A, list, mk){
         .map(([n,v]) => `<span class="chg ${chgClass(v)}">${amt(v)}</span> ${n}`).join(" · ");
       return `<tr><td><span style="text-transform:capitalize">${esc(x.l)}</span><br><span class="small muted">${parts}</span></td><td class="chg ${chgClass(x.change)}">${amt(x.change)}</td></tr>`; }).join("")}</tbody></table></details>` : ""}`;
   }
-  return `<div class="section decomp-sec"><div class="section-head"><h2>Why your spending changed</h2></div>${body}
+  const take = D.e0 && I.why ? `<p class="takeaway">${I.why}${I.topTxt ? ` ${I.topTxt}` : ""}</p>` : "";
+  return `<div class="section decomp-sec" id="sec-why"><div class="section-head"><h2>Why your spending changed</h2></div>${body}${take}
+    ${I.infl ? `<p class="small muted bridge">${I.infl} <button class="linkbtn" data-nav="inflation">See your inflation</button></p>` : ""}
     <p class="small muted decomp-note">Compared with the previous month. The current month is compared only with the same days of last month (e.g. 1–11 Nov vs. 1–11 Oct), so an unfinished month doesn't bias the results. A price change counts as inflation only when you bought the same product at the same place in both months. If you have lunch at two different restaurants, the difference in price isn't counted as inflation, because the restaurants are different by design: it shows up under “Where you shop”.</p></div>`;
 }
  
@@ -988,9 +1123,10 @@ systemDark.addEventListener("change", applyTheme);
 /* ---------- events ---------- */
 document.addEventListener("click", e => {
   const au = e.target.closest("[data-auth]"); if (au){ showAuth(au.dataset.auth); return; }
-  const t = e.target.closest("[data-action],[data-nav],[data-cat],[data-prod],[data-receipt],[data-month],[data-scrim]");
+  const t = e.target.closest("[data-jump],[data-action],[data-nav],[data-cat],[data-prod],[data-receipt],[data-month],[data-scrim]");
   if (!t) return;
   if (t.dataset.scrim !== undefined){ if (e.target === t && !S.scanCtl) closeSheet(); return; }
+  if (t.dataset.jump){ document.getElementById(t.dataset.jump)?.scrollIntoView({behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block:"start"}); return; }
   if (t.dataset.nav){ S.view = t.dataset.nav; if (location.hash !== "#"+S.view) history.replaceState(null, "", "#"+S.view); closeSheet(); render(); window.scrollTo(0,0); return; }
   if (t.dataset.month){ const allM = monthList(analyze(receipts())); const i = allM.indexOf(S.month) + +t.dataset.month; if (allM[i]){ S.month = allM[i]; S.openCat = null; render(); } return; }
   if (t.dataset.cat){ S.openCat = S.openCat === t.dataset.cat ? null : t.dataset.cat; render(); return; }

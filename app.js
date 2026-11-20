@@ -149,10 +149,11 @@ function analyze(list){
     P.perMonth = P.buys.length / Math.max(1, mks.length);
   }
   // price premium: what you paid above the cheapest price you paid for the same product in the same month
-  // (compared per unit). Staying within one month keeps inflation from counting as a premium.
+  // (compared per unit). Staying within one month keeps inflation from counting as a premium. Services and
+  // fixed costs are left out (PREMIUM_OUT): there a different price usually means a different choice.
   let premium = 0;
   for (const P of Object.values(products)){
-    P.premium = 0; if (P.category === "housing" || P.buys.length < 2) continue;
+    P.premium = 0; if (PREMIUM_OUT.includes(P.category) || P.buys.length < 2) continue;
     const lo = {}, k = b => b.mk + "|" + b.unit;
     P.buys.forEach(b => { lo[k(b)] = Math.min(lo[k(b)] ?? Infinity, b.unitPrice); });
     for (const b of P.buys){
@@ -273,6 +274,9 @@ function render(){
 /* ---------- spending pace & where the money goes ---------- */
 const FIXED_COSTS = ["housing","insurance_financial","telecommunications"];
 const PARETO_OUT = ["housing","insurance_financial","telecommunications","transport","education","child_care","eating_out"];
+// Price premium only counts everyday purchases you can change, not services or fixed costs where a different price
+// means a deliberately different choice (another restaurant, rent for a new flat).
+const PREMIUM_OUT = PARETO_OUT;
 const catList = ids => ids.map(c => CAT[c]).join(", ");
 // a[d] = money spent from the 1st up to and including day d (stays flat after the month ends)
 function cumDays(list, mk, withFixed){
@@ -453,17 +457,11 @@ function homeInsights(A, list, mk, D){
 
   // 5. paying more than you need to?
   if (M.premium >= 0.5){
-    // services (two restaurants, two haircuts) differ by design, so they're named separately from products
-    const ranked = Object.entries(M.premProds).sort((x,y) => y[1] - x[1]);
-    const isProd = k => !PARETO_OUT.includes(A.products[k]?.category), lbl = k => esc(A.products[k]?.label || k);
-    const [tk, tv] = ranked[0], prod = ranked.find(([k]) => isProd(k));
-    const bestAt = k => A.products[k]?.buys.filter(b => b.mk === mk && b.store).sort((x,y) => x.unitPrice - y.unitPrice)[0]?.store;
-    const prodTxt = ([k, v]) => `<b style="text-transform:capitalize">${lbl(k)}</b> (${money(v)})${bestAt(k) ? `, cheapest at ${esc(bestAt(k))}` : ""}`;
-    if (prod){ I.premK = prod[0]; I.premV = prod[1]; I.premIsProduct = true; }
-    I.premium = `Yes: <b class="num">${money(M.premium)}</b> above your best prices this month. `
-      + (isProd(tk) ? `Most of it is ${prodTxt(ranked[0])}.`
-        : `Most of it is <b style="text-transform:capitalize">${lbl(tk)}</b> (${money(tv)}), which compares different places, so it isn't really overpaying.`
-          + (prod && prod[1] >= 0.5 ? ` Among products, the biggest is ${prodTxt(prod)}.` : ""));
+    const [k, v] = Object.entries(M.premProds).sort((x,y) => y[1] - x[1])[0], P = A.products[k];
+    const best = P?.buys.filter(b => b.mk === mk && b.store).sort((x,y) => x.unitPrice - y.unitPrice)[0];
+    I.premK = k; I.premV = v;
+    I.premium = `Yes: <b class="num">${money(M.premium)}</b> above your best prices this month, most on <b style="text-transform:capitalize">${esc(P?.label || k)}</b> (${money(v)}).`
+      + (best ? ` You got it cheapest at ${esc(best.store)}.` : "");
   } else I.premium = A.premium ? "No: this month you paid your best price each time." : "Not measurable yet: it needs the same product bought more than once in a month.";
 
   // where to start: the single most useful thing to look at
@@ -475,7 +473,7 @@ function homeInsights(A, list, mk, D){
     start = `Where you shop: you paid more for the same products at other places. Open a product to see where you paid least.`;
   else if (I.mainCause === "prices" && I.mainVal > 0)
     start = `Rising prices. See the <button class="linkbtn" data-nav="inflation">Inflation</button> tab for the products that rose most, and look for alternatives to those.`;
-  else if (I.premIsProduct && I.premV >= 5)
+  else if (I.premV >= 5)
     start = `<b style="text-transform:capitalize">${esc(A.products[I.premK]?.label || I.premK)}</b>: buy it where you got it cheapest. That saves money without buying less.`;
   else start = flexTop;
   I.start = start ? (I.over === false ? `This month is not above usual. If you want to save more anyway, start with ${start}` : `Start with ${start}`) : "";
@@ -556,7 +554,7 @@ function viewHome(A, list){
     <p class="takeaway">${I.premium}</p>
     ${A.premium ? `<details class="more" data-note="premium"${S.openNotes.has("premium")?" open":""}><summary class="small muted">What this means</summary>
       <p class="small muted">Also called the price premium. What you'd have saved by always paying your lowest price for products you bought more than once. All time: <b class="num">${money(A.premium)}</b>.</p>
-      <p class="small muted">Each purchase is compared with the lowest price you paid for the same product in the same month, so price rises over time (inflation) don't count as a premium. Left out: ${esc(CAT.housing)}, and products you bought only once.</p>
+      <p class="small muted">Each purchase is compared with the lowest price you paid for the same product in the same month, so price rises over time (inflation) don't count as a premium. Left out: ${esc(catList(PREMIUM_OUT))}. These are services and fixed costs, where a different price usually means a different choice, like another restaurant or a new flat. Products you bought only once are left out too.</p>
     </details>` : `<span class="small muted">Appears once you've bought the same product at different prices in the same month.</span>`}
   </div>
   ${paceSection(A, list, mk)}

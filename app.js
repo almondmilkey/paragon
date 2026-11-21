@@ -321,8 +321,7 @@ function paceSection(A, list, mk){
     <div class="section-head"><h2>Spending pace</h2><button class="chip" data-action="togglefixed" aria-pressed="${S.withFixed}">${S.withFixed ? "Rent &amp; bills included" : "Rent &amp; bills left out"}</button></div>
     <p class="pace-lead">${lead}</p>
     ${paceChart(mk, cur, avg, today)}
-    <p class="small muted bridge">Pace shows how this month builds up day by day. Month by month, below, shows whether it's part of a longer trend.</p>
-    <details class="more chart-note" data-note="pace"${S.openNotes.has("pace")?" open":""}><summary class="small muted">How this is worked out</summary><p class="small muted">${note}</p></details></div>`;
+    <details class="more chart-note" data-note="pace"${S.openNotes.has("pace")?" open":""}><summary class="small muted">How this is worked out</summary><p class="small muted">Pace shows how this month builds up day by day. Month by month, below, shows whether it's part of a longer trend.</p><p class="small muted">${note}</p></details></div>`;
 }
 // One bar per product, largest on the left. The dashed line is what each product would cost if the month's
 // spending were split evenly, so the shape shows at a glance whether a few products dominate.
@@ -359,9 +358,12 @@ function paretoSection(A){
   return `${head}
     <p class="pace-lead">Your top 5 products are <b>${(topShare*100).toFixed(0)}%</b> of your shopping in ${esc(label)}, out of ${ps.length} products. ${verdict}</p>
     ${paretoChart(ps, tot)}
-    <p class="small muted chart-note">Each bar is one product, largest on the left. Dashed line: what each product would cost if the month's spending were split evenly. Tap a bar to see the product.</p>
-    <div class="ledger">${rows}<div class="pareto-rest"><span>Other ${rest} product${plural(rest)}, about ${money((tot-topTot)/rest)} each</span><span class="num">${money(tot - topTot)} · ${((1-topShare)*100).toFixed(0)}%</span></div></div>
-    <p class="small muted chart-note">The month you picked on Overview. Left out: ${esc(catList(PARETO_OUT))}. These are services and fixed costs rather than products, so they would hide the rest.</p></div>`;
+    <details class="more chart-note" data-note="pareto"${S.openNotes.has("pareto")?" open":""}><summary class="small muted">How to read this chart</summary>
+      <p class="small muted">Each bar is one product, largest on the left. Dashed line: what each product would cost if the month's spending were split evenly. Tap a bar to see the product.</p>
+      <p class="small muted">Shows the month you picked on Overview.</p>
+      <p class="small muted">Left out: ${esc(catList(PARETO_OUT))}. These are services and fixed costs, not products you pick off a shelf. One rent or insurance payment would be bigger than everything else together and squash the other bars flat. And a different price there usually means a different choice (another restaurant, a new contract), not a product bought more expensively.</p>
+    </details>
+    <div class="ledger">${rows}<div class="pareto-rest"><span>Other ${rest} product${plural(rest)}, about ${money((tot-topTot)/rest)} each</span><span class="num">${money(tot - topTot)} · ${((1-topShare)*100).toFixed(0)}%</span></div></div></div>`;
 }
 
 /* ---------- spending type: progress towards revealing your card ---------- */
@@ -562,7 +564,7 @@ function viewHome(A, list){
   ${paceSection(A, list, mk)}
   <div class="section" id="sec-months"><h2>Month by month</h2>${barChart(A, mk)}
     ${I.trend ? `<p class="takeaway">${I.trend}</p>` : ""}
-    <span class="small muted chart-note">Bars: monthly totals. Dashed line: your monthly average. Includes every category, rent and bills too.</span></div>
+    <details class="more chart-note" data-note="months"${S.openNotes.has("months")?" open":""}><summary class="small muted">How to read this chart</summary><p class="small muted">Bars: monthly totals. Dashed line: your monthly average. Includes every category, rent and bills too.</p></details></div>
   ${typeProgressSection()}`;
 }
 
@@ -604,9 +606,9 @@ function viewProducts(A){
   return `
   <div class="section"><h1>Products</h1><span class="muted small hint">Tap a product to see its price history, where it's cheapest and how often you buy it.</span></div>
   ${q ? "" : paretoSection(A)}
-  ${A.staples.length && !q ? `<div class="section"><div class="section-head"><h2>Your staples</h2><span class="small muted">bought in ≥ half of your months</span></div>
+  ${A.staples.length && !q ? `<div class="section staples-sec"><div class="section-head"><h2>Your staples</h2><span class="small muted">bought in ≥ half of your months</span></div>
     <div class="ledger">${A.staples.slice(0,12).map(productRow).join("")}</div></div>`:""}
-  <div class="section"><div class="section-head"><h2>${q?"Results":"Everything else"}</h2></div>
+  <div class="section all-sec"><div class="section-head"><h2>${q?"Results":"Everything else"}</h2></div>
     <input class="search" id="q" type="search" placeholder="Search products or categories" value="${esc(S.q)}" aria-label="Search products">
     ${(q?filtered:filtered.filter(P=>!stapleKeys.has(P.key))).map(productRow).join("") || `<div class="empty">No products match.</div>`}</div>`;
 }
@@ -716,13 +718,13 @@ function sheetProduct(k){
   notes.push(`You buy it about ${P.perMonth >= 1 ? P.perMonth.toFixed(1)+"× a month" : "once every "+Math.round(1/P.perMonth)+" months"}, ${money(P.total/Math.max(1,A.mks.length))} a month on average.`);
   openSheet(`${sheetHead(esc(P.label), ` style="text-transform:capitalize"`)}
     <span class="small muted">${esc(CAT[P.category])} · ${P.buys.length} purchases · ${money(P.total)} total</span>
-    <div class="stats">
+    <div class="stats no-outline">
       <div class="stat"><span class="label">Avg / ${unit}</span><span class="v num">${money(P.avgUnit)}</span></div>
       <div class="stat"><span class="label">Range</span><span class="v num" style="font-size:.95rem">${money(P.minUnit)}–${money(P.maxUnit)}</span></div>
       <div class="stat"><span class="label">Change</span><span class="v num chg ${P.change==null?"flat":chgClass(P.change)}">${P.change==null?"—":pct(P.change)}</span></div>
     </div>
     ${pts.length>1?`<div class="section"><span class="label">Price per ${unit}, each purchase</span>${lineChart(pts,{fmt:v=>money(v), label:"Price history"})}<span class="small muted chart-note">Each point is one purchase, as price per ${unit}. Nothing is left out.</span></div>`:""}
-    <div class="card small" style="display:flex;flex-direction:column;gap:6px">${notes.map(n=>`<span>${esc(n)}</span>`).join("")}</div>
+    <div class="card small no-outline" style="display:flex;flex-direction:column;gap:6px">${notes.map(n=>`<span>${esc(n)}</span>`).join("")}</div>
     ${P.stores.length?`<table class="mini"><thead><tr><th>Shop</th><th>Bought</th><th>Avg / ${unit}</th></tr></thead><tbody>${P.stores.map(([s,p,n])=>`<tr><td>${esc(s)}</td><td class="muted">${n}×</td><td>${money(p)}</td></tr>`).join("")}</tbody></table>`:""}`);
 }
  

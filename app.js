@@ -482,13 +482,13 @@ function homeInsights(A, list, mk, D){
 }
 
 function guideSection(I){
-  const step = (q, ans, jump, label) => ans ? `<li><span class="gq">${q}</span><span class="ga">${ans}</span>${jump ? `<button class="linkbtn" data-jump="${jump}">${label}</button>` : ""}</li>` : "";
+  const step = (q, ans) => ans ? `<li><span class="gq">${q}</span><span class="ga">${ans}</span></li>` : "";
   const steps = [
-    step("Is this month unusual?", I.unusual, "sec-months", "See month by month"),
-    step("Is it a one-off or a trend?", I.trend, "sec-months", "See month by month"),
-    step("Prices, shops or habits?", I.why ? I.why + (I.infl ? ` ${I.infl}` : "") : "", "sec-why", "See why your spending changed"),
-    step("Where does the money go?", I.where, "sec-cats", "See spending per category"),
-    step("Paying more than you need to?", I.premium, "sec-premium", "See paid above your best price"),
+    step("Is this month unusual?", I.unusual),
+    step("Is it a one-off or a trend?", I.trend),
+    step("Prices, shops or habits?", I.why ? I.why + (I.infl ? ` ${I.infl}` : "") : ""),
+    step("Where does the money go?", I.where),
+    step("Paying more than you need to?", I.premium),
   ].join("");
   if (!steps) return "";
   return `<div class="card guide" role="group" aria-label="What's behind this month">
@@ -1121,10 +1121,9 @@ systemDark.addEventListener("change", applyTheme);
 /* ---------- events ---------- */
 document.addEventListener("click", e => {
   const au = e.target.closest("[data-auth]"); if (au){ showAuth(au.dataset.auth); return; }
-  const t = e.target.closest("[data-jump],[data-action],[data-nav],[data-cat],[data-prod],[data-receipt],[data-month],[data-scrim]");
+  const t = e.target.closest("[data-action],[data-nav],[data-cat],[data-prod],[data-receipt],[data-month],[data-scrim]");
   if (!t) return;
   if (t.dataset.scrim !== undefined){ if (e.target === t && !S.scanCtl) closeSheet(); return; }
-  if (t.dataset.jump){ document.getElementById(t.dataset.jump)?.scrollIntoView({behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block:"start"}); return; }
   if (t.dataset.nav){ S.view = t.dataset.nav; if (location.hash !== "#"+S.view) history.replaceState(null, "", "#"+S.view); closeSheet(); render(); window.scrollTo(0,0); return; }
   if (t.dataset.month){ const allM = monthList(analyze(receipts())); const i = allM.indexOf(S.month) + +t.dataset.month; if (allM[i]){ S.month = allM[i]; S.openCat = null; render(); } return; }
   if (t.dataset.cat){ S.openCat = S.openCat === t.dataset.cat ? null : t.dataset.cat; render(); return; }

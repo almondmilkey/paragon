@@ -542,8 +542,10 @@ function viewHome(A, list){
     <div class="section-head"><h2>Spending per category</h2></div>
     ${cats.length ? `<div class="ledger">${rowsHtml}</div>` : `<div class="empty">No expenses in ${mkLabel(mk,true)} yet.</div>`}
     ${I.where ? `<p class="takeaway">${I.where}</p>` : ""}
-    ${I.fixedTxt ? `<p class="small muted bridge">${I.fixedTxt}</p>` : ""}
-    <p class="small muted bridge">Tap a category to see its products. Top products, below, shows the single products that cost the most.</p>
+    <details class="more" data-note="cats"${S.openNotes.has("cats")?" open":""}><summary class="small muted">More about this</summary>
+      ${I.fixedTxt ? `<p class="small muted">${I.fixedTxt}</p>` : ""}
+      <p class="small muted">Tap a category to see its products. Top products, below, shows the single products that cost the most.</p>
+    </details>
   </div>
   ${prods.length ? `<div class="section top-prods"><div class="section-head"><h2>Top products</h2><button class="linkbtn" data-nav="products">All products</button></div>
     <table class="mini"><tbody>${prods.map(([k,v])=>`<tr><td style="text-transform:capitalize">${esc(A.products[k]?.label||k)}</td><td>${money(v)}</td></tr>`).join("")}</tbody></table>

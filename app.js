@@ -605,12 +605,91 @@ function productRow(P){
     <span class="meta">${esc(CAT[P.category])} · ${P.buys.length}× in ${P.monthsBought} mo</span>
     <span class="chg ${ch==null?"flat":chgClass(ch)}">${ch==null?"one month":pct(ch)+" since "+mkShort(P.firstMk)}</span></button>`;
 }
-function viewProducts(A){
+/* ---------- Products: where you could save ----------
+   Two levers. Regular buys: the same product, bought where it's cheapest for you. Bigger and occasional spending:
+   how often and how much, per visit. Both use your last 6 complete months, so old prices and a half-finished
+   month don't skew the estimate. */
+const BIG_CATS = ["eating_out","clothes_and_shoes","transport","child_care","pet_care","leisure","arts_culture","sports_fitness","specialized_equipment"];
+const unitShort = u => u === "kg" ? "kg" : u === "l" ? "l" : "pc";
+function saveWindow(A){ const w = A.completeMks.slice(-6); return w.length ? w : A.mks.slice(-6); }
+
+// Regular buys: your average price per unit vs. the average at the shop where it's cheapest for you
+function shopSavings(A){
+  const W = new Set(saveWindow(A)), n = W.size, rows = []; let oneShop = 0;
+  for (const P of A.staples){
+    if (PARETO_OUT.includes(P.category)) continue;
+    const buys = P.buys.filter(b => W.has(b.mk) && b.unit === P.unit && b.store && b.qty > 0);
+    const st = {};
+    for (const b of buys){ const S_ = st[key(b.store)] ||= {name:b.store, q:0, e:0}; S_.q += b.qty; S_.e += b.unitPrice * b.qty; }
+    const shops = Object.values(st);
+    if (shops.length < 2){ if (buys.length) oneShop++; continue; }
+    const q = sum(shops.map(s => s.q)), e = sum(shops.map(s => s.e)), yours = e/q;
+    const best = shops.map(s => ({...s, avg: s.e/s.q})).sort((x,y) => x.avg - y.avg)[0];
+    const year = (yours - best.avg) * (q/n) * 12;
+    if (year >= 5) rows.push({P, shop:best.name, price:best.avg, yours, year});
+  }
+  rows.sort((x,y) => y.year - x.year);
+  return {rows: rows.slice(0, 8), total: sum(rows.map(r => r.year)), oneShop, n};
+}
+
+// Bigger and occasional spending: per visit (one receipt), leaving out monthly repeats
+function bigSpending(A, list){
+  const months = saveWindow(A), W = new Set(months), n = months.length, C = {};
+  for (const r of list){
+    const mk = mkOf(r.date); if (!W.has(mk) || r.recurringId) continue;
+    const per = {};
+    for (const it of r.items || []){ const c = catOf(it.category); if (BIG_CATS.includes(c)) per[c] = (per[c]||0) + num(it.price); }
+    for (const [c, v] of Object.entries(per)){ if (v <= 0) continue; const X = C[c] ||= {c, visits:0, e:0, ms:new Set(), amts:[], perMk:{}}; X.visits++; X.e += v; X.ms.add(mk); X.amts.push(v); X.perMk[mk] = (X.perMk[mk]||0) + 1; }
+  }
+  // once a month at (almost) the same amount looks like a pass or subscription that wasn't added as a monthly repeat
+  const fixedLike = X => X.ms.size === n && n >= 2 && Object.values(X.perMk).every(k => k === 1) && sd(X.amts) / mean(X.amts) < .05;
+  return {n, rows: Object.values(C).map(X => ({...X, avg: X.e/X.visits, perMonth: X.visits/n, year: X.e/n*12, regular: X.ms.size/n > .5, fixed: fixedLike(X)}))
+    .filter(X => X.year >= 1).sort((x,y) => y.year - x.year)};
+}
+
+function savingsSection(A, list){
+  const R = shopSavings(A), B = bigSpending(A, list);
+  if (!R.rows.length && !B.rows.length) return "";
+  const basis = `your last ${R.n} complete month${plural(R.n)}`;
+  const regular = R.rows.length ? `
+    <h3 class="save-h">Your regular buys: buy where it's cheapest</h3>
+    <table class="mini save-table"><thead><tr><th>Product</th><th>Cheapest at</th><th>Price there</th><th>Save / year</th></tr></thead><tbody>
+      ${R.rows.map(r => `<tr data-prod="${esc(r.P.key)}"><td style="text-transform:capitalize">${esc(r.P.label)}</td><td>${esc(r.shop)}</td><td class="num">${money(r.price)}/${unitShort(r.P.unit)}</td><td class="num chg down">≈ ${money(r.year,0)}</td></tr>`).join("")}
+    </tbody></table>
+    <p class="takeaway">Buying these where they're cheapest for you could save about <b class="num">${money(R.total,0)}</b> a year, without buying less.</p>
+    <details class="more" data-note="save-shop"${S.openNotes.has("save-shop")?" open":""}><summary class="small muted">How this is estimated</summary>
+      <p class="small muted">For each product you buy regularly, we take your average price per kg, litre or piece over ${basis} and the average at the shop where it's cheapest for you. Averages, not your single best deal, because a one-off promotion can't be repeated every time.</p>
+      <p class="small muted">Save per year = (your average price − the price at the cheapest shop) × how much you buy in an average month × 12. It assumes you keep buying the same amounts, just at the cheaper shop.</p>
+      <p class="small muted">Only products you bought at two or more shops can be compared, and only savings of ${money(5,0)} a year or more are shown.${R.oneShop ? ` ${R.oneShop} regular product${plural(R.oneShop)} you always buy at the same shop ${R.oneShop === 1 ? "isn't" : "aren't"} here.` : ""} Tap a product to see all its shops.</p>
+    </details>` : "";
+  const times = v => { const r = Math.round(v*10)/10; return Number.isInteger(r) || r >= 3 ? String(Math.round(r)) : r.toFixed(1); };
+  const fmtFreq = x => x.perMonth >= 1 ? `about ${times(x.perMonth)}× a month` : `about once every ${Math.round(1/x.perMonth)} months`;
+  const big = B.rows.length ? `
+    <h3 class="save-h">Bigger and occasional spending</h3>
+    <div class="big-list">${B.rows.map(x => `<div class="big-row"><div class="big-top"><span class="name">${esc(CAT[x.c])}</span><span class="num">≈ ${money(x.year,0)} / year</span></div>
+      <span class="small muted">${x.fixed
+        ? `Looks like a fixed monthly payment of about ${money(x.avg,0)}, like a pass or a subscription. If it is, adding it as a monthly repeat keeps it out of this list.`
+        : `${fmtFreq(x)}, ${money(x.avg,0)} per visit on average. ${x.regular
+        ? `One fewer a month saves about <b class="num">${money(x.avg*12,0)}</b> a year.`
+        : `It's occasional for you, so each single decision counts: skipping one saves ${money(x.avg,0)}.`}`}</span></div>`).join("")}</div>
+    <p class="takeaway"><b>${esc(CAT[B.rows[0].c])}</b> adds up the most: about ${money(B.rows[0].year,0)} a year at your current pace.</p>
+    <details class="more" data-note="save-big"${S.openNotes.has("save-big")?" open":""}><summary class="small muted">How this is estimated</summary>
+      <p class="small muted">Based on ${basis}. A visit is one receipt: one dinner out, one trip to a clothes shop, one ticket. Per year = your average month in that category × 12.</p>
+      <p class="small muted">Whether something is regular or occasional comes from your own receipts: regular means you spent on it in more than half of those months. Monthly repeats, like a transit pass or insurance, are left out, because they don't change with each choice.</p>
+      <p class="small muted">Only you know whether it's worth it to you. Some of this spending is exactly what money is for.</p>
+    </details>` : "";
+  return `<div class="section save-sec"><h2>Where you could save</h2>
+    ${R.n < 3 ? `<p class="small muted">An estimate based on ${R.n} month${plural(R.n)} so far. It gets more reliable as you add receipts.</p>` : ""}
+    ${regular}${big}</div>`;
+}
+
+function viewProducts(A, list){
   const all = Object.values(A.products).filter(P=>P.category!=="housing").sort((a,b)=>b.total-a.total);
   const q = key(S.q); const filtered = q ? all.filter(P => P.key.includes(q) || key(CAT[P.category]).includes(q)) : all;
   const stapleKeys = new Set(A.staples.map(P=>P.key));
   return `
   <div class="section"><h1>Products</h1><span class="muted small hint">Tap a product to see its price history, where it's cheapest and how often you buy it.</span></div>
+  ${q ? "" : savingsSection(A, list)}
   ${q ? "" : paretoSection(A)}
   ${A.staples.length && !q ? `<div class="section staples-sec"><div class="section-head"><h2>Your staples</h2><span class="small muted">bought in more than half of your months</span></div>
     <div class="ledger">${A.staples.slice(0,12).map(productRow).join("")}</div></div>`:""}

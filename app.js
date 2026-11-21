@@ -493,7 +493,6 @@ function guideSection(I){
   if (!steps) return "";
   return `<div class="card guide" role="group" aria-label="What's behind this month">
     <h2>What's behind this month</h2>
-    <p class="small muted">Five questions, in the order worth asking them. Each answer comes from a section further down.</p>
     <ol>${steps}</ol>
     ${I.start ? `<p class="takeaway">${I.start}</p>` : ""}
     <p class="small muted">MijnParagon doesn't see your income. If you earn more than before, spending more can be a choice rather than a problem. Compare these numbers with what you want to save.</p>
@@ -523,7 +522,7 @@ function viewHome(A, list){
   return `
   <div class="section">
     <div class="monthbar"><button class="chev" data-month="-1" ${pos<=0?"disabled":""} aria-label="Previous month">‹</button><span class="m">${mkLabel(mk,true)}</span><button class="chev" data-month="1" ${pos>=allM.length-1?"disabled":""} aria-label="Next month">›</button></div>
-    <div class="hero"><span class="label">Spent this month</span><span class="big num">${money(M.total)}</span>${vs}<span class="small muted">${M.count} receipt${plural(M.count)}</span></div>
+    <div class="hero"><span class="label">Spent this month</span><span class="big num">${money(M.total)}</span>${vs}</div>
   </div>
   <div class="stats two">
     <div class="stat"><span class="label">Monthly avg</span><span class="v num">${avg?money(avg,0):"—"}</span></div>
@@ -586,7 +585,7 @@ function decompSection(A, list, mk, D, I){
   const take = D.e0 && I.why ? `<p class="takeaway">${I.why}${I.topTxt ? ` ${I.topTxt}` : ""}</p>` : "";
   return `<div class="section decomp-sec" id="sec-why"><div class="section-head"><h2>Why your spending changed</h2></div>${body}${take}
     ${I.infl ? `<p class="small muted bridge">${I.infl} <button class="linkbtn" data-nav="inflation">See your inflation</button></p>` : ""}
-    <p class="small muted decomp-note">Compared with the previous month. The current month is compared only with the same days of last month (e.g. 1–11 Nov vs. 1–11 Oct), so an unfinished month doesn't bias the results. A price change counts as inflation only when you bought the same product at the same place in both months. If you have lunch at two different restaurants, the difference in price isn't counted as inflation, because the restaurants are different by design: it shows up under “Where you shop”.</p></div>`;
+    <details class="more" data-note="decomp"${S.openNotes.has("decomp")?" open":""}><summary class="small muted">How this is worked out</summary><p class="small muted decomp-note">Compared with the previous month. The current month is compared only with the same days of last month (e.g. 1–11 Nov vs. 1–11 Oct), so an unfinished month doesn't bias the results. A price change counts as inflation only when you bought the same product at the same place in both months. If you have lunch at two different restaurants, the difference in price isn't counted as inflation, because the restaurants are different by design: it shows up under “Where you shop”.</p></details></div>`;
 }
  
 function productRow(P){

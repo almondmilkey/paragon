@@ -66,7 +66,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{ou
 .stats.two{grid-template-columns:1fr 1fr}
 .stats-note{margin:12px 0 28px}
 .stats-note p{margin:0}
-.more summary{cursor:pointer; text-decoration:underline; text-underline-offset:3px; margin-top:8px; width:max-content}
+.more summary{cursor:pointer; margin-top:8px; width:max-content}
 .more[open] summary{margin-bottom:10px}
 .more > p{margin:10px 0 0}
 .more > :last-child{margin-bottom:0}
@@ -259,7 +259,7 @@ altcha-widget{display:block;
 .takeaway{margin:4px 0 0; padding-left:10px; border-left:3px solid var(--taupe); font-size:.92rem; line-height:1.45}
 .bridge{margin:0}
 .guide{display:flex; flex-direction:column; gap:10px; margin:4px 0 28px}
-.guide h2{margin:0}
+.guide h2{margin:0 0 30px}   /* keeps the space the intro line used to take */
 .guide p{margin:0}
 .guide ol{margin:0; padding-left:1.3em; display:flex; flex-direction:column; gap:12px}
 .guide li{display:flex; flex-direction:column; gap:2px}
@@ -274,3 +274,5 @@ altcha-widget{display:block;
 #view[data-view="home"] :is(.stat, .card, .premium){border:0}
 #view[data-view="home"] .hero .big{margin:16px 0 20px}
 #view[data-view="home"] .hero .pill{border:0}
+#view[data-view="home"] .hero{padding-bottom:28px}   /* free space where the receipt count used to be */
+#sec-cats .ledger{border-top:0}

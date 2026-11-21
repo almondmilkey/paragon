@@ -162,7 +162,7 @@ function analyze(list){
       M.premCats[b.cat] = (M.premCats[b.cat]||0) + p; M.premProds[P.key] = (M.premProds[P.key]||0) + p;
     }
   }
-  const staples = Object.values(products).filter(P => P.category !== "housing" && mks.length >= 2 && P.monthsBought >= 2 && P.share >= .5)
+  const staples = Object.values(products).filter(P => P.category !== "housing" && mks.length >= 2 && P.monthsBought >= 2 && P.share > .5)
     .sort((a,b)=> b.share - a.share || b.total - a.total);
   return {months, mks, completeMks, stats, products, staples, curMk, premium};
 }
@@ -453,7 +453,7 @@ function homeInsights(A, list, mk, D){
       riser = flex.map(([k,val]) => [k, val - mean(base.map(m => A.months[m].cats[k] || 0))]).sort((x,y) => y[1] - x[1])[0];
       if (riser[1] < 5) riser = null;
     }
-    I.where = `<b>${esc(CAT[c])}</b> is your biggest everyday cost: <b class="num">${money(v,0)}</b>, ${(v/flexTot*100).toFixed(0)}% of what you spent outside rent and bills.`
+    I.where = `<b>${esc(CAT[c])}</b> is your biggest category outside rent and bills: <b class="num">${money(v,0)}</b> (${(v/flexTot*100).toFixed(0)}%).`
       + (riser ? ` <b>${esc(CAT[riser[0]])}</b> grew most: ${money(riser[1],0)} above its usual month.` : "");
     I.fixedTxt = fixed >= 1 ? `${esc(catList(FIXED_COSTS))}: ${money(fixed,0)}. These are fixed costs, so they change only when you change a contract.` : "";
   }
@@ -468,7 +468,7 @@ function homeInsights(A, list, mk, D){
   } else I.premium = A.premium ? "No: this month you paid your best price each time." : "Not measurable yet: it needs the same product bought more than once in a month.";
 
   // where to start: the single most useful thing to look at
-  const flexTop = I.topCat ? `<b>${esc(CAT[I.topCat])}</b>, your biggest everyday cost: small changes there go furthest.` : "";
+  const flexTop = I.topCat ? `<b>${esc(CAT[I.topCat])}</b>, your biggest category outside rent and bills: small changes there go furthest.` : "";
   let start = "";
   if (I.mainCause === "habits" && I.mainVal > 0 && I.top && I.top.change > 0)
     start = `<b style="text-transform:capitalize">${esc(I.top.l)}</b>: it changed the most. Buying it less often, or swapping it for something cheaper, has the biggest effect.`;
@@ -518,8 +518,11 @@ function viewHome(A, list){
       sub = `<div class="sub">${Object.values(items).sort((a,b)=>b.v-a.v).map(i=>`<div><span>${esc(i.l)}${i.n>1?` <span class="muted">×${i.n}</span>`:""}</span><span class="num">${M.premProds[i.k]?`<span class="prem">premium ${money(M.premProds[i.k])}</span> `:""}${money(i.v)}</span></div>`).join("")}</div>`; }
     return `<button class="row" data-cat="${c}" aria-expanded="${open}"><span class="chev-r">›</span><span class="name">${esc(CAT[c])}</span><span class="amt">${money(v)}${M.premCats[c]?`<small class="prem">premium ${money(M.premCats[c])}</small>`:""}</span><span class="meter"><i style="width:${(v/top*100).toFixed(1)}%"></i></span></button>${sub}`;
   }).join("");
-  const prods = Object.entries(M.prods).sort((a,b)=>b[1]-a[1]).slice(0,5);
-  const topFlex = Object.entries(M.prods).filter(([k]) => !PARETO_OUT.includes(A.products[k]?.category)).sort((a,b)=>b[1]-a[1])[0];
+  // regular buys: products (not services) bought in more than half of your months, the same rule as "Your staples".
+  // Savings add up on these because you buy them again and again; one-off purchases stay visible in the categories.
+  const regular = new Set(A.staples.filter(P => !PARETO_OUT.includes(P.category)).map(P => P.key));
+  const prods = Object.entries(M.prods).filter(([k]) => regular.has(k)).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const perYear = k => A.products[k].total / Math.max(1, A.mks.length) * 12;
   const D = decompose(list, mk, A.curMk), I = homeInsights(A, list, mk, D);
   return `
   <div class="section">
@@ -546,13 +549,16 @@ function viewHome(A, list){
     ${I.where ? `<p class="takeaway">${I.where}</p>` : ""}
     <details class="more" data-note="cats"${S.openNotes.has("cats")?" open":""}><summary class="small muted">More about this</summary>
       ${I.fixedTxt ? `<p class="small muted">${I.fixedTxt}</p>` : ""}
-      <p class="small muted">Tap a category to see its products. Top products, below, shows the single products that cost the most.</p>
+      <p class="small muted">Tap a category to see its products. Your regular buys, below, shows the products you buy again and again.</p>
     </details>
   </div>
-  ${prods.length ? `<div class="section top-prods"><div class="section-head"><h2>Top products</h2><button class="linkbtn" data-nav="products">All products</button></div>
-    <table class="mini"><tbody>${prods.map(([k,v])=>`<tr><td style="text-transform:capitalize">${esc(A.products[k]?.label||k)}</td><td>${money(v)}</td></tr>`).join("")}</tbody></table>
-    ${topFlex ? `<p class="takeaway"><b style="text-transform:capitalize">${esc(A.products[topFlex[0]]?.label || topFlex[0])}</b> is your biggest everyday product this month (${money(topFlex[1])}). A small change in how often or where you buy it goes a long way.</p>` : ""}
-    <p class="small muted bridge">For every product ranked by what it costs you, see <button class="linkbtn" data-nav="products">Where most of your money goes</button> on Products.</p></div>`:""}
+  ${prods.length ? `<div class="section top-prods"><div class="section-head"><h2>Your regular buys</h2><span class="small muted">this month · a year</span></div>
+    <table class="mini"><tbody>${prods.map(([k,v])=>`<tr><td style="text-transform:capitalize">${esc(A.products[k]?.label||k)}</td><td>${money(v)}</td><td class="muted">≈ ${money(perYear(k),0)}</td></tr>`).join("")}</tbody></table>
+    <p class="takeaway">Of what you buy regularly, the biggest is <b style="text-transform:capitalize">${esc(A.products[prods[0][0]]?.label || prods[0][0])}</b>: ${money(prods[0][1])} this month, about ${money(perYear(prods[0][0]),0)} a year. Saving a little on it, every time you buy it, adds up.</p>
+    <details class="more" data-note="regular"${S.openNotes.has("regular")?" open":""}><summary class="small muted">What counts as a regular buy</summary>
+      <p class="small muted">Products you bought in more than half of your months. One-off purchases, like clothes, and services, like eating out or transport, aren't here: you'll find them under Spending per category. A year is your average month for that product, times 12.</p>
+      <p class="small muted">For every product ranked by what it costs you, see <button class="linkbtn" data-nav="products">Where most of your money goes</button> on Products.</p>
+    </details></div>`:""}
   <div class="premium" id="sec-premium">
     <div class="premium-head"><span class="label">Paid above your best price · ${esc(mkLabel(mk,true))}</span><span class="v num">${money(M.premium)}</span></div>
     <p class="takeaway">${I.premium}</p>
@@ -606,7 +612,7 @@ function viewProducts(A){
   return `
   <div class="section"><h1>Products</h1><span class="muted small hint">Tap a product to see its price history, where it's cheapest and how often you buy it.</span></div>
   ${q ? "" : paretoSection(A)}
-  ${A.staples.length && !q ? `<div class="section staples-sec"><div class="section-head"><h2>Your staples</h2><span class="small muted">bought in ≥ half of your months</span></div>
+  ${A.staples.length && !q ? `<div class="section staples-sec"><div class="section-head"><h2>Your staples</h2><span class="small muted">bought in more than half of your months</span></div>
     <div class="ledger">${A.staples.slice(0,12).map(productRow).join("")}</div></div>`:""}
   <div class="section all-sec"><div class="section-head"><h2>${q?"Results":"Everything else"}</h2></div>
     <input class="search" id="q" type="search" placeholder="Search products or categories" value="${esc(S.q)}" aria-label="Search products">

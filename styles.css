@@ -281,7 +281,6 @@ altcha-widget{display:block;
 #view[data-view="products"] .ledger{border-top:0}
 #view[data-view="products"] .search{border:0}
 .no-outline,.no-outline .stat{border:0}   /* product sheet: boxes without outlines, like Overview */
-#view[data-view="products"] .hint{margin-top:0}
 
 /* Products: where you could save */
 .save-sec{margin-bottom:40px}
@@ -291,3 +290,5 @@ altcha-widget{display:block;
 .big-list{display:flex; flex-direction:column}
 .big-row{display:flex; flex-direction:column; gap:2px; padding:10px 2px; border-bottom:1px solid var(--line)}
 .big-top{display:flex; justify-content:space-between; gap:12px; font-family:var(--display)}
+#view[data-view="home"] .stat{align-items:center; justify-content:center; text-align:center}
+#view[data-view="products"] .save-sec{margin-top:12px}

@@ -688,7 +688,7 @@ function viewProducts(A, list){
   const q = key(S.q); const filtered = q ? all.filter(P => P.key.includes(q) || key(CAT[P.category]).includes(q)) : all;
   const stapleKeys = new Set(A.staples.map(P=>P.key));
   return `
-  <div class="section"><h1>Products</h1><span class="muted small hint">Tap a product to see its price history, where it's cheapest and how often you buy it.</span></div>
+  <div class="section"><h1>Products</h1></div>
   ${q ? "" : savingsSection(A, list)}
   ${q ? "" : paretoSection(A)}
   ${A.staples.length && !q ? `<div class="section staples-sec"><div class="section-head"><h2>Your staples</h2><span class="small muted">bought in more than half of your months</span></div>

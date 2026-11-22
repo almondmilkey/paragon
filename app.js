@@ -144,7 +144,8 @@ function analyze(list){
     P.monthsBought = Object.keys(byM).length;
     const pm = Object.keys(byM).sort();
     P.firstMk = pm[0]; P.lastMk = pm[pm.length-1];
-    P.change = pm.length > 1 ? P.monthly[P.lastMk]/P.monthly[P.firstMk] - 1 : null;
+    P.pc = sameShopChange(P, mks.slice(-13));   // price change: same product, same shop, last 12 months
+    P.change = P.pc ? P.pc.change : null;
     P.lastUnit = ups[ups.length-1];
     P.lastVsAvg = P.avgUnit ? P.lastUnit/P.avgUnit - 1 : 0;
     const st = {}; P.buys.forEach(b => { if (b.store) (st[b.store] ||= []).push(b.unitPrice); });
@@ -210,25 +211,34 @@ function indexedSpendYear(A, cat){
   for (const P of Object.values(A.products)) if (indexable(P, cat)) e += sum(P.buys.filter(b => W.has(b.mk)).map(b => b.price));
   return e / Math.max(1, W.size) * 12;
 }
-// biggest price changes, same product at the same shop, ranked by what they cost you in a year
+// A product's price change: for each shop where you bought it in two or more months (within W), your first month's
+// price per unit against your last; shops you spend more at count more. The single definition used everywhere
+// (Inflation tab, product list, product sheet), so the numbers always agree.
+function sameShopChange(P, W){
+  const Wset = new Set(W), st = {};
+  for (const b of P.buys){ if (!Wset.has(b.mk) || !b.store || !(b.qty > 0) || b.unit !== P.unit) continue;
+    const S_ = st[key(b.store)] ||= {name:b.store, m:{}, e:0}; const X = S_.m[b.mk] ||= {q:0, e:0}; X.q += b.qty; X.e += b.unitPrice*b.qty; S_.e += b.unitPrice*b.qty; }
+  let w = 0, dch = 0, dp = 0, main = null, since = null;
+  for (const S_ of Object.values(st)){
+    const ms = Object.keys(S_.m).sort(); if (ms.length < 2) continue;
+    const f = S_.m[ms[0]], l = S_.m[ms[ms.length-1]], p0 = f.e/f.q, p1 = l.e/l.q;
+    w += S_.e; dch += S_.e * (p1/p0 - 1); dp += S_.e * (p1 - p0);
+    if (!main || S_.e > main.e) main = S_; if (!since || ms[0] < since) since = ms[0];
+  }
+  return w ? {change: dch/w, perUnit: dp/w, shop: main.name, since} : null;
+}
+// biggest price changes, ranked by what they cost you in a year
 function priceMovers(A){
   const W = A.mks.slice(-13), Wset = new Set(W), recent = new Set(saveWindow(A)), out = [];
   for (const P of Object.values(A.products)){
-    if (!indexable(P)) continue;
-    const buys = P.buys.filter(b => Wset.has(b.mk) && b.store && b.qty > 0 && b.unit === P.unit);
+    if (!indexable(P) || !P.pc) continue;
+    const buys = P.buys.filter(b => Wset.has(b.mk) && b.qty > 0 && b.unit === P.unit);
+    const year = P.pc.perUnit * sum(buys.map(b => b.qty)) / W.length * 12;
+    // where it's cheaper now: recent average price per shop, against the shop you mostly buy it at
     const st = {};
-    for (const b of buys){ const S_ = st[key(b.store)] ||= {name:b.store, m:{}, e:0, rq:0, re:0}; const X = S_.m[b.mk] ||= {q:0, e:0}; X.q += b.qty; X.e += b.unitPrice*b.qty; S_.e += b.unitPrice*b.qty;
-      if (recent.has(b.mk)){ S_.rq += b.qty; S_.re += b.unitPrice*b.qty; } }
-    let w = 0, dch = 0, dp = 0, main = null;
-    for (const S_ of Object.values(st)){
-      const ms = Object.keys(S_.m).sort(); if (ms.length < 2) continue;
-      const f = S_.m[ms[0]], l = S_.m[ms[ms.length-1]], p0 = f.e/f.q, p1 = l.e/l.q;
-      w += S_.e; dch += S_.e * (p1/p0 - 1); dp += S_.e * (p1 - p0); if (!main || S_.e > main.e) main = S_;
-    }
-    if (!w) continue;
-    const qpm = sum(buys.map(b => b.qty)) / W.length, change = dch/w, year = dp/w * qpm * 12;
-    const cheaper = Object.values(st).filter(S_ => S_.rq && main.rq && S_ !== main).map(S_ => ({name:S_.name, p:S_.re/S_.rq})).sort((x,y) => x.p - y.p)[0];
-    out.push({P, change, year, shop: main.name, cheaper: cheaper && cheaper.p < (main.re/main.rq)*.97 ? cheaper : null});
+    for (const b of buys){ if (!recent.has(b.mk) || !b.store) continue; const X = st[key(b.store)] ||= {name:b.store, q:0, e:0}; X.q += b.qty; X.e += b.unitPrice*b.qty; }
+    const mainR = st[key(P.pc.shop)], cheaper = Object.values(st).filter(X => X !== mainR).map(X => ({name:X.name, p:X.e/X.q})).sort((x,y) => x.p - y.p)[0];
+    out.push({P, change: P.pc.change, year, shop: P.pc.shop, cheaper: mainR && cheaper && cheaper.p < (mainR.e/mainR.q)*.97 ? cheaper : null});
   }
   return out;
 }
@@ -629,7 +639,7 @@ function productRow(P){
   return `<button class="prod" data-prod="${esc(P.key)}">
     <span class="pn">${esc(P.label)}</span><span class="pr">${money(P.avgUnit)}<span class="muted small">/${P.unit==="kg"?"kg":P.unit==="l"?"l":"pc"}</span></span>
     <span class="meta">${esc(CAT[P.category])} · ${P.buys.length}× in ${P.monthsBought} mo</span>
-    <span class="chg ${ch==null?"flat":chgClass(ch)}">${ch==null?"one month":pct(ch)+" since "+mkShort(P.firstMk)}</span></button>`;
+    <span class="chg ${ch==null?"flat":chgClass(ch)}">${ch==null?"no price comparison yet":`${pct(ch)} since ${mkShort(P.pc.since)} at ${esc(P.pc.shop)}`}</span></button>`;
 }
 /* ---------- Products: where you could save ----------
    Two levers. Regular buys: the same product, bought where it's cheapest for you. Bigger and occasional spending:
@@ -916,9 +926,9 @@ function sheetProduct(k){
     <div class="stats no-outline">
       <div class="stat"><span class="label">Avg / ${unit}</span><span class="v num">${money(P.avgUnit)}</span></div>
       <div class="stat"><span class="label">Range</span><span class="v num" style="font-size:.95rem">${money(P.minUnit)}–${money(P.maxUnit)}</span></div>
-      <div class="stat"><span class="label">Change</span><span class="v num chg ${P.change==null?"flat":chgClass(P.change)}">${P.change==null?"—":pct(P.change)}</span></div>
+      <div class="stat"><span class="label">Change, same shop</span><span class="v num chg ${P.change==null?"flat":chgClass(P.change)}">${P.change==null?"—":pct(P.change)}</span></div>
     </div>
-    ${pts.length>1?`<div class="section"><span class="label">Price per ${unit}, each purchase</span>${lineChart(pts,{fmt:v=>money(v), label:"Price history"})}<span class="small muted chart-note">Each point is one purchase, as price per ${unit}. Nothing is left out.</span></div>`:""}
+    ${pts.length>1?`<div class="section"><span class="label">Price per ${unit}, each purchase</span>${lineChart(pts,{fmt:v=>money(v), label:"Price history"})}<span class="small muted chart-note">Each point is one purchase, as price per ${unit}, at any shop. Nothing is left out. “Change, same shop” compares your first and last month at the same shop within the last 12 months, the same way as on Inflation, so a cheaper or pricier shop doesn't count as a price change.</span></div>`:""}
     <div class="card small no-outline" style="display:flex;flex-direction:column;gap:6px">${notes.map(n=>`<span>${esc(n)}</span>`).join("")}</div>
     ${P.stores.length?`<table class="mini"><thead><tr><th>Shop</th><th>Bought</th><th>Avg / ${unit}</th></tr></thead><tbody>${P.stores.map(([s,p,n])=>`<tr><td>${esc(s)}</td><td class="muted">${n}×</td><td>${money(p)}</td></tr>`).join("")}</tbody></table>`:""}`);
 }

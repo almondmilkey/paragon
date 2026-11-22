@@ -174,22 +174,65 @@ function analyze(list){
 // every month you can step through on Home: all months with receipts, plus the running one
 const monthList = A => A.mks.includes(A.curMk) ? A.mks : [...A.mks, A.curMk];
  
-/* spend-weighted personal price index: each product against its own starting price */
+/* Personal price index, chained month to month. Each month, every product bought in both that month and the one
+   before is compared on price per unit, weighted by what you spent on it.
+   sameShop: true → only the same product at the same shop counts: pure price change (inflation), the same rule as
+     "Why your spending changed" on Overview. Promotions at that shop still count, they're prices you paid.
+   sameShop: false → the price you paid wherever you bought it, so switching shops moves it too.
+   The gap between the two is what your choice of shop added or saved. */
 const NO_INDEX = new Set(["housing","eating_out","clothes_and_shoes","leisure","health","transport"]);
-function priceIndex(A, filterCat){
-  const elig = Object.values(A.products).filter(P => P.monthsBought >= 2 && !NO_INDEX.has(P.category) && (!filterCat || P.category === filterCat));
-  elig.forEach(P => { const ms = Object.keys(P.monthly).sort().slice(0,2); P.base = mean(ms.map(m=>P.monthly[m])); });
-  const pts = []; let lastV = 100;
-  A.mks.forEach(mk => {
-    let w = 0, s = 0;
-    for (const P of elig){ const b = P.monthly[mk]; if (b && P.base){ w += P.total; s += P.total * (b/P.base); } }
-    if (w) lastV = 100 * s / w;
-    pts.push({mk, v:lastV});
+const indexable = (P, cat) => !NO_INDEX.has(P.category) && (!cat || P.category === cat);
+function chainIndex(A, {sameShop = true, cat = null} = {}){
+  const per = {}; const used = new Set();
+  for (const P of Object.values(A.products)){
+    if (!indexable(P, cat)) continue;
+    for (const b of P.buys){
+      if (!(b.qty > 0) || (sameShop && !b.store)) continue;
+      const g = P.key + "|" + b.unit + (sameShop ? "|" + key(b.store) : "");
+      const X = ((per[g] ||= {P, m:{}}).m[b.mk] ||= {q:0, e:0}); X.q += b.qty; X.e += b.unitPrice * b.qty;
+    }
+  }
+  const pts = []; let v = 100;
+  A.mks.forEach((mk, i) => {
+    if (i){ const prev = A.mks[i-1]; let w = 0, s = 0;
+      for (const G of Object.values(per)){ const x = G.m[prev], y = G.m[mk]; if (!x || !y) continue;
+        const wt = (x.e + y.e)/2; w += wt; s += wt * (y.e/y.q)/(x.e/x.q); used.add(G.P.key); }
+      if (w) v *= s/w; }
+    pts.push({mk, v});
   });
-  if (pts.length){ const f = 100 / pts[0].v; pts.forEach(p => p.v *= f); }
-  return {pts, count: elig.length};
+  return {pts, count: used.size};
 }
- 
+// change over the last 12 months (or since your first month), from an index
+function indexChange(I){ const p = I.pts; if (p.length < 2) return null; const ref = p[Math.max(0, p.length-13)]; return {ref, span: p.length-1-p.indexOf(ref), ch: p[p.length-1].v/ref.v - 1}; }
+// what the products in the index cost you in a year, from your recent months
+function indexedSpendYear(A, cat){
+  const W = new Set(saveWindow(A)); let e = 0;
+  for (const P of Object.values(A.products)) if (indexable(P, cat)) e += sum(P.buys.filter(b => W.has(b.mk)).map(b => b.price));
+  return e / Math.max(1, W.size) * 12;
+}
+// biggest price changes, same product at the same shop, ranked by what they cost you in a year
+function priceMovers(A){
+  const W = A.mks.slice(-13), Wset = new Set(W), recent = new Set(saveWindow(A)), out = [];
+  for (const P of Object.values(A.products)){
+    if (!indexable(P)) continue;
+    const buys = P.buys.filter(b => Wset.has(b.mk) && b.store && b.qty > 0 && b.unit === P.unit);
+    const st = {};
+    for (const b of buys){ const S_ = st[key(b.store)] ||= {name:b.store, m:{}, e:0, rq:0, re:0}; const X = S_.m[b.mk] ||= {q:0, e:0}; X.q += b.qty; X.e += b.unitPrice*b.qty; S_.e += b.unitPrice*b.qty;
+      if (recent.has(b.mk)){ S_.rq += b.qty; S_.re += b.unitPrice*b.qty; } }
+    let w = 0, dch = 0, dp = 0, main = null;
+    for (const S_ of Object.values(st)){
+      const ms = Object.keys(S_.m).sort(); if (ms.length < 2) continue;
+      const f = S_.m[ms[0]], l = S_.m[ms[ms.length-1]], p0 = f.e/f.q, p1 = l.e/l.q;
+      w += S_.e; dch += S_.e * (p1/p0 - 1); dp += S_.e * (p1 - p0); if (!main || S_.e > main.e) main = S_;
+    }
+    if (!w) continue;
+    const qpm = sum(buys.map(b => b.qty)) / W.length, change = dch/w, year = dp/w * qpm * 12;
+    const cheaper = Object.values(st).filter(S_ => S_.rq && main.rq && S_ !== main).map(S_ => ({name:S_.name, p:S_.re/S_.rq})).sort((x,y) => x.p - y.p)[0];
+    out.push({P, change, year, shop: main.name, cheaper: cheaper && cheaper.p < (main.re/main.rq)*.97 ? cheaper : null});
+  }
+  return out;
+}
+
 /* why spending changed: a month vs. the previous one, split into inflation / where you shop / habits.
    Price effect per product (Bennet): (p1 - p0) * (q0 + q1)/2. The part of it seen at the same place in both
    months is inflation, the rest comes from switching places. Everything else (quantities, new or dropped
@@ -400,11 +443,8 @@ function homeInsights(A, list, mk, D){
       : `<b class="chg ${D.change > 0 ? "up" : "down"}">${amt0(D.change)}</b> vs. ${esc(since)}. The biggest part is ${expl}: ${amt0(main[1])}.`;
     I.topTxt = I.top ? `Biggest single change: <b style="text-transform:capitalize">${esc(I.top.l)}</b> <span class="chg ${chgClass(I.top.change)}">${amt0(I.top.change)}</span>.` : "";
   }
-  const PI = priceIndex(A);
-  if (PI.count && PI.pts.length >= 2){
-    const pts = PI.pts, ref = pts[Math.max(0, pts.length-13)], ch = pts[pts.length-1].v/ref.v - 1;
-    I.infl = `Since ${mkLabel(ref.mk,true)}, the prices of what you buy ${ch >= 0 ? "rose" : "fell"} ${(Math.abs(ch)*100).toFixed(1)}%.`;
-  }
+  const PI = chainIndex(A), pc = PI.count && indexChange(PI);
+  if (pc) I.infl = `Since ${mkLabel(pc.ref.mk,true)}, the prices of what you buy (same product, same shop) ${pc.ch >= 0 ? "rose" : "fell"} ${(Math.abs(pc.ch)*100).toFixed(1)}%.`;
 
   // 4. where does the money go? Everyday costs separately from rent and bills, which you can't change month to month.
   const flex = Object.entries(M.cats).filter(([c,v]) => !FIXED_COSTS.includes(c) && v > 0).sort((x,y) => y[1] - x[1]);
@@ -744,28 +784,53 @@ function viewProducts(A, list){
 }
  
 function viewInflation(A){
-  const I = priceIndex(A);
-  if (A.mks.length < 2 || I.count === 0) return `<div class="section"><h1>Your inflation</h1><div class="empty">Your personal inflation appears once you've bought the same products in at least two different months.</div></div>`;
-  const pts = I.pts; const last = pts[pts.length-1];
-  const refI = Math.max(0, pts.length-13); const ref = pts[refI];
-  const span = pts.length-1-refI; const ch = last.v/ref.v - 1;
-  const annual = span >= 12 ? ch : Math.pow(1+ch, 12/Math.max(1,span)) - 1;
-  const movers = Object.values(A.products).filter(P=>P.change!=null && !NO_INDEX.has(P.category)).sort((a,b)=>b.change-a.change);
-  const up = movers.filter(P=>P.change>0).slice(0,5), down = movers.filter(P=>P.change<0).slice(-3).reverse();
-  const cats = [...new Set(Object.values(A.products).filter(P=>P.monthsBought>=2 && !NO_INDEX.has(P.category)).map(P=>P.category))]
-    .map(c => { const ci = priceIndex(A, c); const p = ci.pts; return [c, p[p.length-1].v/p[0].v - 1, ci.count]; }).sort((a,b)=>b[1]-a[1]);
+  const I = chainIndex(A), c = indexChange(I);
+  if (A.mks.length < 2 || !I.count || !c) return `<div class="section"><h1>Your inflation</h1><div class="empty">Your personal inflation appears once you've bought the same product at the same shop in two different months.</div></div>`;
+  const {ref, span, ch} = c, pts = I.pts;
+  const yr = indexedSpendYear(A), extra = yr * ch / (1 + ch);
+  // what your choice of shop added on top: prices paid wherever you bought, against the same-shop index
+  const paid = indexChange(chainIndex(A, {sameShop:false})), shopFx = paid ? (1 + paid.ch)/(1 + ch) - 1 : 0;
+  const annual = Math.pow(1+ch, 12/Math.max(1,span)) - 1;
+  const fmtP = v => `${(Math.abs(v)*100).toFixed(1)}%`;
+  const shopLine = Math.abs(shopFx) < .01
+    ? `Where you shopped made little difference on top of that: you paid about the same as if you'd stayed at the same shops.`
+    : shopFx > 0
+      ? `On top of that, shopping at pricier places added <b class="chg up">${fmtP(shopFx)}</b>, so in total you paid <b>${fmtP(paid.ch)}</b> ${paid.ch >= 0 ? "more" : "less"}. That part is your choice: see <button class="linkbtn" data-nav="products">Your shops</button>.`
+      : `Shopping at cheaper places saved you <b class="chg down">${fmtP(shopFx)}</b> on top of that, so in total you paid <b>${fmtP(paid.ch)}</b> ${paid.ch >= 0 ? "more" : "less"}.`;
+
+  const mv = priceMovers(A);
+  const up = mv.filter(x => x.year >= 1 && x.change > 0).sort((x,y) => y.year - x.year).slice(0,5);
+  const down = mv.filter(x => x.year <= -1 && x.change < 0).sort((x,y) => x.year - y.year).slice(0,3);
+  const moverRow = x => `<button class="prod" data-prod="${esc(x.P.key)}">
+    <span class="pn">${esc(x.P.label)}</span><span class="pr chg ${chgClass(x.change)}">${pct(x.change,0)}</span>
+    <span class="meta">at ${esc(x.shop)} · about ${money(Math.abs(x.year),0)} a year ${x.year > 0 ? "more" : "less"}${x.cheaper ? ` · cheaper now at ${esc(x.cheaper.name)} (${money(x.cheaper.p)}/${unitShort(x.P.unit)})` : ""}</span></button>`;
+
+  const cats = [...new Set(Object.values(A.products).filter(P => indexable(P)).map(P => P.category))].map(cat => {
+    const ci = chainIndex(A, {cat}), cc = ci.count && indexChange(ci); if (!cc) return null;
+    const y = indexedSpendYear(A, cat); return {cat, ch: cc.ch, n: ci.count, eur: y * cc.ch / (1 + cc.ch)};
+  }).filter(Boolean).sort((x,y) => y.eur - x.eur);
+  const topCat = cats.find(x => x.eur >= 1);
+
   return `
-  <div class="section"><h1>Your inflation</h1><span class="muted small">How much the prices of the things <i>you</i> actually buy have changed. Some categories are left out because their prices can't be compared like for like (see the notes under the chart).</span></div>
+  <div class="section"><h1>Your inflation</h1><span class="muted small">How much the prices of the things <i>you</i> buy have changed, comparing the same product at the same shop.</span></div>
   <div class="hero"><span class="label">${span>=12?"Last 12 months":`Since ${mkLabel(ref.mk,true)} (${span} mo)`}</span><span class="big num">${pct(ch)}</span>
-    ${span<12?`<span class="pill ${annual>0?"up":"down"}">≈ ${pct(annual)} per year at this pace</span>`:""}</div>
-  <div class="section spaced"><details class="more" data-note="inflation"${S.openNotes.has("inflation")?" open":""}><summary class="small muted">Show the chart and notes</summary>
-    <span class="label">Price index, ${mkLabel(pts[0].mk)} = 100</span>${lineChart(pts, {base:100, label:"Personal price index"})}<span class="small muted chart-note">Left out: ${esc(catList([...NO_INDEX]))}. Only products bought in at least two different months count. Dashed line: 100, your starting level.</span><p class="small muted chart-note"><mark class="hl">This index reflects the prices you actually paid, including promotions and where you shopped.</mark> For a month-to-month breakdown of price changes for the same product at the same shop, see <button class="linkbtn" data-nav="home">“Why your spending changed” on Home</button>.</p>
+    ${Math.abs(extra) >= 1 ? `<span class="pill ${extra>0?"up":"down"}">about ${money(Math.abs(extra),0)} a year ${extra>0?"more":"less"} for the same basket</span>` : ""}
+    ${span >= 6 && span < 12 ? `<span class="small muted">≈ ${pct(annual)} per year at this pace</span>` : ""}</div>
+  <p class="takeaway">${shopLine}</p>
+  <div class="section spaced" style="margin-top:16px"><details class="more" data-note="inflation"${S.openNotes.has("inflation")?" open":""}><summary class="small muted">Show the chart and notes</summary>
+    <span class="label">Price index, same product at the same shop, ${mkLabel(pts[0].mk)} = 100</span>${lineChart(pts, {base:100, label:"Personal price index"})}
+    <p class="small muted chart-note">Dashed line: 100, your starting level. Only products you bought at the same shop in two different months count (${I.count} so far). Left out: ${esc(catList([...NO_INDEX]))}, because their prices can't be compared like for like.</p>
+    <p class="small muted chart-note"><mark class="hl">Promotions count, because they're prices you paid at that shop. Switching shops doesn't: that's your choice, shown separately above.</mark> “About ${money(Math.abs(extra),0)} a year” is what the same products cost you in a year now, compared with the prices back then.</p>
   </details></div>
-  <div class="section"><h2>Biggest price rises</h2><div class="ledger">${up.map(productRow).join("") || `<div class="empty">No price rises yet.</div>`}</div></div>
-  ${down.length?`<div class="section"><h2>Got cheaper</h2><div class="ledger">${down.map(productRow).join("")}</div></div>`:""}
-  <div class="section"><h2>By category</h2><table class="mini"><thead><tr><th>Category</th><th>Products</th><th>Change</th></tr></thead><tbody>
-    ${cats.map(([c,v,n])=>`<tr><td>${esc(CAT[c])}</td><td class="muted">${n}</td><td class="chg ${chgClass(v)}">${pct(v)}</td></tr>`).join("")}</tbody></table></div>
-  <details class="card fold-card" data-note="calc"${S.openNotes.has("calc")?" open":""}><summary><h3>How this is calculated</h3></summary><p class="small muted" style="margin:10px 0 0">For every product you've bought in at least two months, MijnParagon takes its price per unit (per piece, kg or litre) and compares each month with that product's own starting price. Products you spend more on count more. The result is one index that starts at 100, so 105 means your usual basket costs 5% more than when you started. Promotions and switching shops move the number too, which is the point: it measures your real basket, not an official one.</p></details>`;
+  <div class="section"><h2>Biggest price rises</h2><div class="ledger">${up.map(moverRow).join("") || `<div class="empty">No price rises yet.</div>`}</div>
+    ${up.length ? `<p class="takeaway"><b style="text-transform:capitalize">${esc(up[0].P.label)}</b> costs you the most extra: about ${money(up[0].year,0)} a year.${up[0].cheaper ? ` It's cheaper now at ${esc(up[0].cheaper.name)}.` : ""}</p>` : ""}</div>
+  ${down.length ? `<div class="section" style="margin-top:24px"><h2>Got cheaper</h2><div class="ledger">${down.map(moverRow).join("")}</div></div>` : ""}
+  <div class="section" style="margin-top:24px"><h2>By category</h2><table class="mini"><thead><tr><th>Category</th><th>Change</th><th>A year</th></tr></thead><tbody>
+    ${cats.map(x => `<tr><td>${esc(CAT[x.cat])}<br><span class="small muted">${x.n} product${plural(x.n)}</span></td><td class="chg ${chgClass(x.ch)}">${pct(x.ch)}</td><td class="chg ${chgClass(x.eur/100)}">${Math.abs(x.eur) < .5 ? "—" : amt0(x.eur)}</td></tr>`).join("")}</tbody></table>
+    ${topCat ? `<p class="takeaway"><b>${esc(CAT[topCat.cat])}</b> adds the most to your inflation: about ${money(topCat.eur,0)} a year more than ${span>=12?"12 months ago":`in ${mkLabel(ref.mk,true)}`}.</p>` : ""}</div>
+  <details class="card fold-card" data-note="calc"${S.openNotes.has("calc")?" open":""}><summary><h3>How this is calculated</h3></summary>
+    <p class="small muted" style="margin:10px 0 0">Every month, each product you bought at the same shop in that month and the month before is compared on price per unit (per piece, kg or litre). Products you spend more on count more. The monthly changes are chained into one index that starts at 100, so 105 means the same products at the same shops cost 5% more than when you started.</p>
+    <p class="small muted" style="margin:10px 0 0">Price rises per product compare your first and last month at the same shop within the last 12 months. “A year” is that price change times how much you usually buy. The shop effect compares this index with the prices you actually paid wherever you shopped.</p></details>`;
 }
  
 function viewHistory(A, list){

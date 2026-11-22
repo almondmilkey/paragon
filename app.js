@@ -70,7 +70,12 @@ function makeDemo(){
     ["chocolate","ZARTBITTER 100G","snacks","pcs",1.49,[1,2],.3],["sparkling water","MINERALW. 1,5L","drinks","pcs",.55,[2,6],.4],
     ["toilet paper","TOILETTENPAPIER 8R","household","pcs",3.95,[1,1],.12],["toothpaste","ZAHNCREME 75ML","hygiene","pcs",2.45,[1,1],.1],
     ["shampoo","SHAMPOO 300ML","hygiene","pcs",3.75,[1,1],.08]];
-  const stores = [["Lidl",.99],["Aldi Nord",.98],["REWE",1.03],["Edeka",1.04]];
+  // [shop, price level, how often you go there]: discounters are clearly cheaper, and the demo person
+  // does most shopping at a pricier supermarket, so the shop comparison has something to show
+  // Over the months they drift towards Edeka, so the demo tells one story: spending creeps up partly through shop choice.
+  const stores = [["Edeka",1.14],["Lidl",.94],["REWE",1.10],["Aldi Nord",.92]];
+  const pickStore = monthsIn => { const e = .25 + .04*monthsIn, w = [e, (1-e)*.45, (1-e)*.3, (1-e)*.25];
+    let r = rnd(); for (let i = 0; i < stores.length; i++){ if ((r -= w[i]) < 0) return stores[i]; } return stores[0]; };
   const drift = {coffee:.012, butter:-.006, "olive oil":.009, cheese:.006, eggs:.005, chocolate:.01};
   const out = []; const now = new Date(); const curMk = mkOf(todayISO());
   for (let k = 7; k >= 0; k--){
@@ -79,7 +84,7 @@ function makeDemo(){
     const trips = k===0 ? 2 : 6 + Math.floor(rnd()*3);
     for (let t = 0; t < trips; t++){
       const d = Math.max(1, Math.min(lastDay, Math.round((t+.5)*lastDay/trips)));
-      const [store, mult] = stores[Math.floor(rnd()*stores.length)];
+      const [store, mult] = pickStore(7-k);
       const items = [];
       P.forEach(([prod,name,cat,unit,base,[q0,q1],p]) => {
         if (rnd() > p) return;
@@ -426,15 +431,34 @@ function homeInsights(A, list, mk, D){
       + (best ? ` You got it cheapest at ${esc(best.store)}.` : "");
   } else I.premium = A.premium ? "No: this month you paid your best price each time." : "Not measurable yet: it needs the same product bought more than once in a month.";
 
+  // 6–7. conclusions from the Products tab (last 6 complete months, not just this month)
+  const R = shopSavings(A), B = bigSpending(A, list), SH = shopIndex(A, list), save = {};
+  const parts = [];
+  if (R.rows.length){ const r = R.rows[0];
+    parts.push(`Buying <b style="text-transform:capitalize">${esc(r.P.label)}</b> at ${esc(r.shop)} would save about <b class="num">${money(r.year,0)}</b> a year${R.rows.length > 1 ? `, and all your regular buys together about <b class="num">${money(R.total,0)}</b>` : ""}.`); }
+  if (SH.rows.length){ const main = SH.rows[0], cheap = [...SH.rows].sort((x,y) => x.idx - y.idx)[0], gap = (1 + main.idx)/(1 + cheap.idx) - 1;
+    if (main !== cheap){ I.shopGap = gap; I.shopMain = main; I.shopCheap = cheap; }
+    parts.push(main === cheap || gap < .05
+      ? `Your main shop, ${esc(main.name)} (${(main.share*100).toFixed(0)}% of your shopping), is one of your cheapest, so switching shops wouldn't save much overall.`
+      : `You do ${(main.share*100).toFixed(0)}% of your shopping at ${esc(main.name)}, where the same products cost about <b class="chg up">${(gap*100).toFixed(0)}% more</b> than at ${esc(cheap.name)}.`); }
+  if (parts.length) save.shops = parts.join(" ");
+  const bg = B.rows.find(x => !x.fixed);
+  if (bg) save.big = `<b>${esc(CAT[bg.c])}</b>: about <b class="num">${money(bg.year,0)}</b> a year. ` + (bg.regular
+    ? `One fewer a month saves about <b class="num">${money(bg.avg*12,0)}</b>.`
+    : `It's occasional for you, so each time you skip it saves about ${money(bg.avg,0)}.`);
+  I.save = save;
+
   // where to start: the single most useful thing to look at
   const flexTop = I.topCat ? `<b>${esc(CAT[I.topCat])}</b>, your biggest category outside rent and bills: small changes there go furthest.` : "";
   let start = "";
   if (I.mainCause === "habits" && I.mainVal > 0 && I.top && I.top.change > 0)
     start = `<b style="text-transform:capitalize">${esc(I.top.l)}</b>: it changed the most. Buying it less often, or swapping it for something cheaper, has the biggest effect.`;
   else if (I.mainCause === "shops" && I.mainVal > 0)
-    start = `Where you shop: you paid more for the same products at other places. Open a product to see where you paid least.`;
+    start = `where you shop: you paid more for the same products at other places. Open a product to see where you paid least.`;
   else if (I.mainCause === "prices" && I.mainVal > 0)
-    start = `Rising prices. See the <button class="linkbtn" data-nav="inflation">Inflation</button> tab for the products that rose most, and look for alternatives to those.`;
+    start = `rising prices. See the <button class="linkbtn" data-nav="inflation">Inflation</button> tab for the products that rose most, and look for alternatives to those.`;
+  else if (I.shopGap >= .1 && I.shopMain.share >= .3)
+    start = `where you shop: you do ${(I.shopMain.share*100).toFixed(0)}% of your shopping at ${esc(I.shopMain.name)}, where the same products cost about ${(I.shopGap*100).toFixed(0)}% more than at ${esc(I.shopCheap.name)}. Moving your regular buys could save about <b class="num">${money(R.total,0)}</b> a year.`;
   else if (I.premV >= 5)
     start = `<b style="text-transform:capitalize">${esc(A.products[I.premK]?.label || I.premK)}</b>: buy it where you got it cheapest. That saves money without buying less.`;
   else start = flexTop;
@@ -443,6 +467,7 @@ function homeInsights(A, list, mk, D){
 }
 
 function guideSection(I){
+  const save = I.save || {};
   const step = (q, ans) => ans ? `<li><span class="gq">${q}</span><span class="ga">${ans}</span></li>` : "";
   const steps = [
     step("Is this month unusual?", I.unusual),
@@ -450,10 +475,12 @@ function guideSection(I){
     step("Prices, shops or habits?", I.why ? I.why + (I.infl ? ` ${I.infl}` : "") : ""),
     step("Where does the money go?", I.where),
     step("Paying more than you need to?", I.premium),
+    step("Could you pay less for the same things?", save.shops),
+    step("Which choices add up the most?", save.big),
   ].join("");
   if (!steps) return "";
-  return `<div class="card guide" role="group" aria-label="What's behind this month">
-    <h2>What's behind this month</h2>
+  return `<div class="card guide" role="group" aria-label="What's behind your spending">
+    <h2>What's behind your spending</h2>
     <ol>${steps}</ol>
     ${I.start ? `<p class="takeaway">${I.start}</p>` : ""}
     <p class="small muted">MijnParagon doesn't see your income. If you earn more than before, spending more can be a choice rather than a problem. Compare these numbers with what you want to save.</p>
@@ -641,15 +668,16 @@ function shopsSection(A, list){
   const take = main === cheap || gap < .05
     ? `Your main shop, <b>${esc(main.name)}</b> (${(main.share*100).toFixed(0)}% of your shopping), is one of your cheapest for the same products. Switching shops wouldn't save much overall.`
     : `You do ${(main.share*100).toFixed(0)}% of your shopping at <b>${esc(main.name)}</b>, where the same products cost you about <b class="chg up">${(gap*100).toFixed(0)}% more</b> than at <b>${esc(cheap.name)}</b>.`;
-  const vs = v => Math.abs(v) < .005 ? `<span class="chg flat">average</span>` : `<span class="chg ${v > 0 ? "up" : "down"}">${pct(v,0)}</span>`;
+  // a price level, not a change over time: say "pricier/cheaper" so it can't be mistaken for inflation
+  const vs = v => Math.abs(v) < .005 ? `<span class="chg flat">your usual price</span>` : `<span class="chg ${v > 0 ? "up" : "down"}">${Math.abs(v*100).toFixed(0)}% ${v > 0 ? "pricier" : "cheaper"}</span>`;
   return `<div class="section shops-sec"><h2>Your shops</h2>
-    <table class="mini"><thead><tr><th>Shop</th><th>Share</th><th>Prices</th></tr></thead><tbody>
+    <table class="mini"><thead><tr><th>Shop</th><th>Share</th><th>Same products</th></tr></thead><tbody>
       ${rows.map(X => `<tr><td>${esc(X.name)}<br><span class="small muted">compared on ${X.prods} products</span></td><td class="num">${(X.share*100).toFixed(0)}%</td><td>${vs(X.idx)}</td></tr>`).join("")}
     </tbody></table>
     <p class="takeaway">${take}</p>
     <details class="more" data-note="shops"${S.openNotes.has("shops")?" open":""}><summary class="small muted">How this is worked out</summary>
       <p class="small muted">Share: how much of your shopping you did at each shop over your last ${n} complete month${plural(n)}. Services and fixed costs (${esc(catList(NOT_PRODUCTS))}) aren't counted as shopping.</p>
-      <p class="small muted">Prices: for every product you bought at two or more shops, each shop's average price per kg, litre or piece is compared with your own average price for that product. A shop at +8% charged you 8% more than you usually pay for the same things. Products you spend more on count more.</p>
+      <p class="small muted">Same products: for every product you bought at two or more shops, each shop's average price per kg, litre or piece is compared with your own average price for that product. “8% pricier” means that shop charged you 8% more than you usually pay for the same things. It compares shops with each other, not prices over time: for that, see Inflation. Products you spend more on count more.</p>
       <p class="small muted">A shop is listed once you've bought at least 2 products there that you also bought somewhere else.${others ? ` ${others} other shop${plural(others)} ${others === 1 ? "doesn't" : "don't"} have enough to compare yet.` : ""}</p>
     </details></div>`;
 }

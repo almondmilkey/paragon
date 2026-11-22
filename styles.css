@@ -277,7 +277,7 @@ altcha-widget{display:block;
 #view[data-view="home"] .chip{border:0}
 
 /* Products: more air between sections, no heavy rule above the lists */
-#view[data-view="products"] :is(.staples-sec, .all-sec){margin-top:40px}
+#view[data-view="products"] .all-sec{margin-top:40px}
 #view[data-view="products"] .ledger{border-top:0}
 #view[data-view="products"] .search{border:0}
 .no-outline,.no-outline .stat{border:0}   /* product sheet: boxes without outlines, like Overview */
@@ -292,3 +292,4 @@ altcha-widget{display:block;
 .big-top{display:flex; justify-content:space-between; gap:12px; font-family:var(--display)}
 #view[data-view="home"] .stat{align-items:center; justify-content:center; text-align:center}
 #view[data-view="products"] .save-sec{margin-top:12px}
+.shops-sec{margin-top:8px; margin-bottom:40px}

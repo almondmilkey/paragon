@@ -323,49 +323,6 @@ function paceSection(A, list, mk){
     ${paceChart(mk, cur, avg, today)}
     <details class="more chart-note" data-note="pace"${S.openNotes.has("pace")?" open":""}><summary class="small muted">How this is worked out</summary><p class="small muted">Pace shows how this month builds up day by day. Month by month, below, shows whether it's part of a longer trend.</p><p class="small muted">${note}</p></details></div>`;
 }
-// One bar per product, largest on the left. The dashed line is what each product would cost if the month's
-// spending were split evenly, so the shape shows at a glance whether a few products dominate.
-function paretoChart(ps, tot){
-  const W=340,H=170,L=40,B=8,T=16,R=6, n = ps.length, even = tot/n;
-  const max = niceMax(ps[0].v), y = v => T + (H-T-B)*(1 - v/max), bw = (W-L-R)/n;
-  const w = Math.max(1, bw - Math.min(2, bw*.3)), numbered = bw >= 9;
-  let g = moneyGrid(max, y, L, W-R);
-  ps.forEach((p,i) => { const x = L + i*bw, top = i < 5;
-    g += `<g class="pbar" data-prod="${esc(p.key)}"><title>${esc(p.label)}: ${esc(money(p.v))}</title>`
-      + `<rect class="hit" x="${x}" y="${T}" width="${bw}" height="${H-T-B}"/>`
-      + `<rect class="bar${top?" sel":""}" x="${x+(bw-w)/2}" y="${y(p.v)}" width="${w}" height="${Math.max(0,(H-B)-y(p.v))}" rx="${Math.min(2,w/2)}"/>`
-      + (top && numbered ? `<text x="${x+bw/2}" y="${y(p.v)-4}" text-anchor="middle">${i+1}</text>` : "") + `</g>`; });
-  if (!numbered) g += `<text x="${L + 2.5*bw}" y="${y(ps[0].v)-4}" text-anchor="middle">top 5</text>`;
-  g += `<line class="avg" x1="${L}" x2="${W-R}" y1="${y(even)}" y2="${y(even)}"/><text x="${W-R}" y="${y(even)-4}" text-anchor="end">even split ${esc(money(even,0))}</text>`;
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Spending per product, largest first, ${n} products">${g}</svg>`;
-}
-function paretoSection(A){
-  const mk = S.month, M = A.months[mk], label = mkLabel(mk, true);
-  const ps = Object.entries(M ? M.prods : {}).map(([k,v]) => ({key:k, v, label:A.products[k]?.label || k, cat:A.products[k]?.category}))
-    .filter(p => !PARETO_OUT.includes(p.cat) && p.v > 0).sort((a,b) => b.v - a.v);
-  const head = `<div class="section pareto"><div class="section-head"><h2>Where most of your money goes</h2><span class="small muted">${esc(label)}</span></div>`;
-  if (ps.length < 6) return `${head}<div class="empty">Appears once you've bought at least 6 different products in ${esc(label)}.</div></div>`;
-  const tot = sum(ps.map(p => p.v)), top = ps.slice(0,5), topTot = sum(top.map(p => p.v)), topShare = topTot/tot;
-  const ratio = topShare / (5/ps.length), rest = ps.length - 5;
-  // ratio = top 5's share compared with what an even split would give them (5 of n products)
-  const verdict = `An even split would give them ${(500/ps.length).toFixed(0)}%. ` + (
-    ratio >= 1.6 ? "A few products take most of the money, so saving on these first has the biggest effect."
-    : ratio >= 1.25 ? "These are a good place to start, but the other products add up too."
-    : "Your spending is spread evenly, so no product stands out: look at whole categories or shops instead.");
-  let cum = 0;
-  const rows = top.map((p,i) => { const sh = p.v/tot; cum += sh;
-    return `<button class="pareto-row" data-prod="${esc(p.key)}"><span class="pn">${i+1}. ${esc(p.label)}</span><span class="num">${money(p.v)} · ${(sh*100).toFixed(0)}%</span><span class="meter"><i style="width:${(sh*100).toFixed(1)}%"></i></span><span class="small muted cum">${(cum*100).toFixed(0)}% together</span></button>`; }).join("");
-  return `${head}
-    <p class="pace-lead">Your top 5 products are <b>${(topShare*100).toFixed(0)}%</b> of your shopping in ${esc(label)}, out of ${ps.length} products. ${verdict}</p>
-    ${paretoChart(ps, tot)}
-    <details class="more chart-note" data-note="pareto"${S.openNotes.has("pareto")?" open":""}><summary class="small muted">How to read this chart</summary>
-      <p class="small muted">Each bar is one product, largest on the left. Dashed line: what each product would cost if the month's spending were split evenly. Tap a bar to see the product.</p>
-      <p class="small muted">Shows the month you picked on Overview.</p>
-      <p class="small muted">Left out: ${esc(catList(PARETO_OUT))}. These are services and fixed costs, not products you pick off a shelf. One rent or insurance payment would be bigger than everything else together and squash the other bars flat. And a different price there usually means a different choice (another restaurant, a new contract), not a product bought more expensively.</p>
-    </details>
-    <div class="ledger">${rows}<div class="pareto-rest"><span>Other ${rest} product${plural(rest)}, about ${money((tot-topTot)/rest)} each</span><span class="num">${money(tot - topTot)} · ${((1-topShare)*100).toFixed(0)}%</span></div></div></div>`;
-}
-
 /* ---------- spending type: progress towards revealing your card ---------- */
 const TYPE_GOAL = 20;
 // Counts your own scanned or hand-entered expenses. Monthly repeats (rent etc.) say nothing about how you shop, so they don't count.
@@ -518,7 +475,7 @@ function viewHome(A, list){
       sub = `<div class="sub">${Object.values(items).sort((a,b)=>b.v-a.v).map(i=>`<div><span>${esc(i.l)}${i.n>1?` <span class="muted">×${i.n}</span>`:""}</span><span class="num">${M.premProds[i.k]?`<span class="prem">premium ${money(M.premProds[i.k])}</span> `:""}${money(i.v)}</span></div>`).join("")}</div>`; }
     return `<button class="row" data-cat="${c}" aria-expanded="${open}"><span class="chev-r">›</span><span class="name">${esc(CAT[c])}</span><span class="amt">${money(v)}${M.premCats[c]?`<small class="prem">premium ${money(M.premCats[c])}</small>`:""}</span><span class="meter"><i style="width:${(v/top*100).toFixed(1)}%"></i></span></button>${sub}`;
   }).join("");
-  // regular buys: products (not services) bought in more than half of your months, the same rule as "Your staples".
+  // regular buys: products (not services) bought in more than half of your months (A.staples).
   // Savings add up on these because you buy them again and again; one-off purchases stay visible in the categories.
   const regular = new Set(A.staples.filter(P => !PARETO_OUT.includes(P.category)).map(P => P.key));
   const prods = Object.entries(M.prods).filter(([k]) => regular.has(k)).sort((a,b)=>b[1]-a[1]).slice(0,5);
@@ -557,7 +514,7 @@ function viewHome(A, list){
     <p class="takeaway">Of what you buy regularly, the biggest is <b style="text-transform:capitalize">${esc(A.products[prods[0][0]]?.label || prods[0][0])}</b>: ${money(prods[0][1])} this month, about ${money(perYear(prods[0][0]),0)} a year. Saving a little on it, every time you buy it, adds up.</p>
     <details class="more" data-note="regular"${S.openNotes.has("regular")?" open":""}><summary class="small muted">What counts as a regular buy</summary>
       <p class="small muted">Products you bought in more than half of your months. One-off purchases, like clothes, and services, like eating out or transport, aren't here: you'll find them under Spending per category. A year is your average month for that product, times 12.</p>
-      <p class="small muted">For every product ranked by what it costs you, see <button class="linkbtn" data-nav="products">Where most of your money goes</button> on Products.</p>
+      <p class="small muted">For every product ranked by what it costs you, see <button class="linkbtn" data-nav="products">All products</button> on Products.</p>
     </details></div>`:""}
   <div class="premium" id="sec-premium">
     <div class="premium-head"><span class="label">Paid above your best price · ${esc(mkLabel(mk,true))}</span><span class="v num">${money(M.premium)}</span></div>
@@ -647,6 +604,65 @@ function bigSpending(A, list){
     .filter(X => X.year >= 1).sort((x,y) => y.year - x.year)};
 }
 
+// Your shops: for products you bought at two or more shops, how each shop's price compares with your own
+// average price for that same product. Weighted by what you spend, so products you buy a lot count more.
+function shopIndex(A, list){
+  const W = new Set(saveWindow(A)), sh = {};
+  let productTot = 0;
+  // share of your shopping: everything you bought as products (services and fixed costs left out)
+  for (const r of list){
+    if (!W.has(mkOf(r.date)) || !r.store) continue;
+    const v = sum((r.items || []).filter(it => !PARETO_OUT.includes(catOf(it.category))).map(it => num(it.price)));
+    if (v <= 0) continue;
+    const X = sh[key(r.store)] ||= {name:r.store, spend:0, w:0, rel:0, prods:0};
+    X.spend += v; productTot += v;
+  }
+  for (const P of Object.values(A.products)){
+    if (PARETO_OUT.includes(P.category)) continue;
+    const buys = P.buys.filter(b => W.has(b.mk) && b.unit === P.unit && b.store && b.qty > 0);
+    const st = {};
+    for (const b of buys){ const Y = st[key(b.store)] ||= {q:0, e:0}; Y.q += b.qty; Y.e += b.unitPrice * b.qty; }
+    const ks = Object.keys(st); if (ks.length < 2) continue;
+    const ref = sum(ks.map(k => st[k].e)) / sum(ks.map(k => st[k].q));
+    for (const k of ks){ const X = sh[k]; if (!X) continue; X.rel += (st[k].e/st[k].q / ref) * st[k].e; X.w += st[k].e; X.prods++; }
+  }
+  const all = Object.values(sh).map(X => ({...X, share: productTot ? X.spend/productTot : 0, idx: X.w ? X.rel/X.w - 1 : null}));
+  const rows = all.filter(X => X.prods >= 2).sort((x,y) => y.share - x.share);
+  return {rows: rows.length >= 2 ? rows : [], others: all.length - (rows.length >= 2 ? rows.length : 0)};
+}
+
+function shopsSection(A, list){
+  const {rows, others} = shopIndex(A, list);
+  if (!rows.length) return "";
+  const n = saveWindow(A).length, main = rows[0], cheap = [...rows].sort((x,y) => x.idx - y.idx)[0];
+  const gap = (1 + main.idx) / (1 + cheap.idx) - 1;
+  const take = main === cheap || gap < .05
+    ? `Your main shop, <b>${esc(main.name)}</b> (${(main.share*100).toFixed(0)}% of your shopping), is one of your cheapest for the same products. Switching shops wouldn't save much overall.`
+    : `You do ${(main.share*100).toFixed(0)}% of your shopping at <b>${esc(main.name)}</b>, where the same products cost you about <b class="chg up">${(gap*100).toFixed(0)}% more</b> than at <b>${esc(cheap.name)}</b>.`;
+  const vs = v => Math.abs(v) < .005 ? `<span class="chg flat">average</span>` : `<span class="chg ${v > 0 ? "up" : "down"}">${pct(v,0)}</span>`;
+  return `<div class="section shops-sec"><h2>Your shops</h2>
+    <table class="mini"><thead><tr><th>Shop</th><th>Share</th><th>Prices</th></tr></thead><tbody>
+      ${rows.map(X => `<tr><td>${esc(X.name)}<br><span class="small muted">compared on ${X.prods} products</span></td><td class="num">${(X.share*100).toFixed(0)}%</td><td>${vs(X.idx)}</td></tr>`).join("")}
+    </tbody></table>
+    <p class="takeaway">${take}</p>
+    <details class="more" data-note="shops"${S.openNotes.has("shops")?" open":""}><summary class="small muted">How this is worked out</summary>
+      <p class="small muted">Share: how much of your shopping you did at each shop over your last ${n} complete month${plural(n)}. Services and fixed costs (${esc(catList(PARETO_OUT))}) aren't counted as shopping.</p>
+      <p class="small muted">Prices: for every product you bought at two or more shops, each shop's average price per kg, litre or piece is compared with your own average price for that product. A shop at +8% charged you 8% more than you usually pay for the same things. Products you spend more on count more.</p>
+      <p class="small muted">A shop is listed once you've bought at least 2 products there that you also bought somewhere else.${others ? ` ${others} other shop${plural(others)} ${others === 1 ? "doesn't" : "don't"} have enough to compare yet.` : ""}</p>
+    </details></div>`;
+}
+
+// how concentrated your product spending is: tells you whether to start with a few products or with shops
+function concentration(A){
+  const W = new Set(saveWindow(A)), v = {};
+  for (const P of Object.values(A.products)){ if (PARETO_OUT.includes(P.category)) continue; const t = sum(P.buys.filter(b => W.has(b.mk)).map(b => b.price)); if (t > 0) v[P.key] = t; }
+  const vals = Object.values(v).sort((x,y) => y - x); if (vals.length < 6) return "";
+  const share = sum(vals.slice(0,5)) / sum(vals), ratio = share / (5/vals.length), p = (share*100).toFixed(0);
+  return ratio >= 1.6 ? `A few products take most of your money: your top 5 are ${p}% of what you spend on products. Saving on those first has the biggest effect.`
+    : ratio >= 1.25 ? `Your top 5 products are ${p}% of what you spend on products: a good place to start, but the rest adds up too.`
+    : `Your spending is spread over many products (your top 5 are only ${p}%), so where you shop matters more than any single product.`;
+}
+
 function savingsSection(A, list){
   const R = shopSavings(A), B = bigSpending(A, list);
   if (!R.rows.length && !B.rows.length) return "";
@@ -678,7 +694,9 @@ function savingsSection(A, list){
       <p class="small muted">Whether something is regular or occasional comes from your own receipts: regular means you spent on it in more than half of those months. Monthly repeats, like a transit pass or insurance, are left out, because they don't change with each choice.</p>
       <p class="small muted">Only you know whether it's worth it to you. Some of this spending is exactly what money is for.</p>
     </details>` : "";
+  const conc = concentration(A);
   return `<div class="section save-sec"><h2>Where you could save</h2>
+    ${conc ? `<p class="pace-lead">${conc}</p>` : ""}
     ${R.n < 3 ? `<p class="small muted">An estimate based on ${R.n} month${plural(R.n)} so far. It gets more reliable as you add receipts.</p>` : ""}
     ${regular}${big}</div>`;
 }
@@ -686,16 +704,13 @@ function savingsSection(A, list){
 function viewProducts(A, list){
   const all = Object.values(A.products).filter(P=>P.category!=="housing").sort((a,b)=>b.total-a.total);
   const q = key(S.q); const filtered = q ? all.filter(P => P.key.includes(q) || key(CAT[P.category]).includes(q)) : all;
-  const stapleKeys = new Set(A.staples.map(P=>P.key));
   return `
   <div class="section"><h1>Products</h1></div>
   ${q ? "" : savingsSection(A, list)}
-  ${q ? "" : paretoSection(A)}
-  ${A.staples.length && !q ? `<div class="section staples-sec"><div class="section-head"><h2>Your staples</h2><span class="small muted">bought in more than half of your months</span></div>
-    <div class="ledger">${A.staples.slice(0,12).map(productRow).join("")}</div></div>`:""}
-  <div class="section all-sec"><div class="section-head"><h2>${q?"Results":"Everything else"}</h2></div>
+  ${q ? "" : shopsSection(A, list)}
+  <div class="section all-sec"><div class="section-head"><h2>${q?"Results":"All products"}</h2>${q ? "" : `<span class="small muted">by what they've cost you so far</span>`}</div>
     <input class="search" id="q" type="search" placeholder="Search products or categories" value="${esc(S.q)}" aria-label="Search products">
-    ${(q?filtered:filtered.filter(P=>!stapleKeys.has(P.key))).map(productRow).join("") || `<div class="empty">No products match.</div>`}</div>`;
+    ${filtered.map(productRow).join("") || `<div class="empty">No products match.</div>`}</div>`;
 }
  
 function viewInflation(A){

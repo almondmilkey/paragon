@@ -274,10 +274,12 @@ function render(){
  
 /* ---------- spending pace & where the money goes ---------- */
 const FIXED_COSTS = ["housing","insurance_financial","telecommunications"];
-const PARETO_OUT = ["housing","insurance_financial","telecommunications","transport","education","child_care","eating_out"];
+// Services and fixed costs: not products you pick off a shelf, so they're left out of product comparisons
+// (shops, regular buys, savings, price premium). Child care stays in: nappies, baby food or school supplies are products.
+const NOT_PRODUCTS = ["housing","insurance_financial","telecommunications","transport","education","eating_out"];
 // Price premium only counts everyday purchases you can change, not services or fixed costs where a different price
 // means a deliberately different choice (another restaurant, rent for a new flat).
-const PREMIUM_OUT = PARETO_OUT;
+const PREMIUM_OUT = NOT_PRODUCTS;
 const catList = ids => ids.map(c => CAT[c]).join(", ");
 // a[d] = money spent from the 1st up to and including day d (stays flat after the month ends)
 function cumDays(list, mk, withFixed){
@@ -477,7 +479,7 @@ function viewHome(A, list){
   }).join("");
   // regular buys: products (not services) bought in more than half of your months (A.staples).
   // Savings add up on these because you buy them again and again; one-off purchases stay visible in the categories.
-  const regular = new Set(A.staples.filter(P => !PARETO_OUT.includes(P.category)).map(P => P.key));
+  const regular = new Set(A.staples.filter(P => !NOT_PRODUCTS.includes(P.category)).map(P => P.key));
   const prods = Object.entries(M.prods).filter(([k]) => regular.has(k)).sort((a,b)=>b[1]-a[1]).slice(0,5);
   const perYear = k => A.products[k].total / Math.max(1, A.mks.length) * 12;
   const D = decompose(list, mk, A.curMk), I = homeInsights(A, list, mk, D);
@@ -574,7 +576,7 @@ function saveWindow(A){ const w = A.completeMks.slice(-6); return w.length ? w :
 function shopSavings(A){
   const W = new Set(saveWindow(A)), n = W.size, rows = []; let oneShop = 0;
   for (const P of A.staples){
-    if (PARETO_OUT.includes(P.category)) continue;
+    if (NOT_PRODUCTS.includes(P.category)) continue;
     const buys = P.buys.filter(b => W.has(b.mk) && b.unit === P.unit && b.store && b.qty > 0);
     const st = {};
     for (const b of buys){ const S_ = st[key(b.store)] ||= {name:b.store, q:0, e:0}; S_.q += b.qty; S_.e += b.unitPrice * b.qty; }
@@ -612,13 +614,13 @@ function shopIndex(A, list){
   // share of your shopping: everything you bought as products (services and fixed costs left out)
   for (const r of list){
     if (!W.has(mkOf(r.date)) || !r.store) continue;
-    const v = sum((r.items || []).filter(it => !PARETO_OUT.includes(catOf(it.category))).map(it => num(it.price)));
+    const v = sum((r.items || []).filter(it => !NOT_PRODUCTS.includes(catOf(it.category))).map(it => num(it.price)));
     if (v <= 0) continue;
     const X = sh[key(r.store)] ||= {name:r.store, spend:0, w:0, rel:0, prods:0};
     X.spend += v; productTot += v;
   }
   for (const P of Object.values(A.products)){
-    if (PARETO_OUT.includes(P.category)) continue;
+    if (NOT_PRODUCTS.includes(P.category)) continue;
     const buys = P.buys.filter(b => W.has(b.mk) && b.unit === P.unit && b.store && b.qty > 0);
     const st = {};
     for (const b of buys){ const Y = st[key(b.store)] ||= {q:0, e:0}; Y.q += b.qty; Y.e += b.unitPrice * b.qty; }
@@ -646,7 +648,7 @@ function shopsSection(A, list){
     </tbody></table>
     <p class="takeaway">${take}</p>
     <details class="more" data-note="shops"${S.openNotes.has("shops")?" open":""}><summary class="small muted">How this is worked out</summary>
-      <p class="small muted">Share: how much of your shopping you did at each shop over your last ${n} complete month${plural(n)}. Services and fixed costs (${esc(catList(PARETO_OUT))}) aren't counted as shopping.</p>
+      <p class="small muted">Share: how much of your shopping you did at each shop over your last ${n} complete month${plural(n)}. Services and fixed costs (${esc(catList(NOT_PRODUCTS))}) aren't counted as shopping.</p>
       <p class="small muted">Prices: for every product you bought at two or more shops, each shop's average price per kg, litre or piece is compared with your own average price for that product. A shop at +8% charged you 8% more than you usually pay for the same things. Products you spend more on count more.</p>
       <p class="small muted">A shop is listed once you've bought at least 2 products there that you also bought somewhere else.${others ? ` ${others} other shop${plural(others)} ${others === 1 ? "doesn't" : "don't"} have enough to compare yet.` : ""}</p>
     </details></div>`;
@@ -655,7 +657,7 @@ function shopsSection(A, list){
 // how concentrated your product spending is: tells you whether to start with a few products or with shops
 function concentration(A){
   const W = new Set(saveWindow(A)), v = {};
-  for (const P of Object.values(A.products)){ if (PARETO_OUT.includes(P.category)) continue; const t = sum(P.buys.filter(b => W.has(b.mk)).map(b => b.price)); if (t > 0) v[P.key] = t; }
+  for (const P of Object.values(A.products)){ if (NOT_PRODUCTS.includes(P.category)) continue; const t = sum(P.buys.filter(b => W.has(b.mk)).map(b => b.price)); if (t > 0) v[P.key] = t; }
   const vals = Object.values(v).sort((x,y) => y - x); if (vals.length < 6) return "";
   const share = sum(vals.slice(0,5)) / sum(vals), ratio = share / (5/vals.length), p = (share*100).toFixed(0);
   return ratio >= 1.6 ? `A few products take most of your money: your top 5 are ${p}% of what you spend on products. Saving on those first has the biggest effect.`

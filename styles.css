@@ -296,3 +296,4 @@ altcha-widget{display:block;
 /* Inflation: boxes without outlines, no heavy rule under the list headings */
 #view[data-view="inflation"] :is(.card, .stat, .pill){border:0}
 #view[data-view="inflation"] .ledger{border-top:0}
+#view[data-view="inflation"] .infl-sec{margin-top:48px}

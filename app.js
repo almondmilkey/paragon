@@ -832,10 +832,10 @@ function viewInflation(A){
     <p class="small muted chart-note">Dashed line: 100, your starting level. Only products you bought at the same shop in two different months count (${I.count} so far). Left out: ${esc(catList([...NO_INDEX]))}, because their prices can't be compared like for like.</p>
     <p class="small muted chart-note"><mark class="hl">Promotions count, because they're prices you paid at that shop. Switching shops doesn't: that's your choice, shown separately above.</mark> “About ${money(Math.abs(extra),0)} a year” is what the same products cost you in a year now, compared with the prices back then.</p>
   </details></div>
-  <div class="section"><h2>Biggest price rises</h2><div class="ledger">${up.map(moverRow).join("") || `<div class="empty">No price rises yet.</div>`}</div>
+  <div class="section infl-sec"><h2>Biggest price rises</h2><div class="ledger">${up.map(moverRow).join("") || `<div class="empty">No price rises yet.</div>`}</div>
     ${up.length ? `<p class="takeaway"><b style="text-transform:capitalize">${esc(up[0].P.label)}</b> costs you the most extra: about ${money(up[0].year,0)} a year.${up[0].cheaper ? ` It's cheaper now at ${esc(up[0].cheaper.name)}.` : ""}</p>` : ""}</div>
-  ${down.length ? `<div class="section" style="margin-top:24px"><h2>Got cheaper</h2><div class="ledger">${down.map(moverRow).join("")}</div></div>` : ""}
-  <div class="section" style="margin-top:24px"><h2>By category</h2><table class="mini"><thead><tr><th>Category</th><th>Change</th><th>A year</th></tr></thead><tbody>
+  ${down.length ? `<div class="section infl-sec"><h2>Got cheaper</h2><div class="ledger">${down.map(moverRow).join("")}</div></div>` : ""}
+  <div class="section infl-sec"><h2>By category</h2><table class="mini"><thead><tr><th>Category</th><th>Change</th><th>A year</th></tr></thead><tbody>
     ${cats.map(x => `<tr><td>${esc(CAT[x.cat])}<br><span class="small muted">${x.n} product${plural(x.n)}</span></td><td class="chg ${chgClass(x.ch)}">${pct(x.ch)}</td><td class="chg ${chgClass(x.eur/100)}">${Math.abs(x.eur) < .5 ? "—" : amt0(x.eur)}</td></tr>`).join("")}</tbody></table>
     ${topCat ? `<p class="takeaway"><b>${esc(CAT[topCat.cat])}</b> adds the most to your inflation: about ${money(topCat.eur,0)} a year more than ${span>=12?"12 months ago":`in ${mkLabel(ref.mk,true)}`}.</p>` : ""}</div>
   <details class="card fold-card" data-note="calc"${S.openNotes.has("calc")?" open":""}><summary><h3>How this is calculated</h3></summary>

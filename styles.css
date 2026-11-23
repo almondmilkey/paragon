@@ -293,3 +293,6 @@ altcha-widget{display:block;
 #view[data-view="home"] .stat{align-items:center; justify-content:center; text-align:center}
 #view[data-view="products"] .save-sec{margin-top:12px}
 .shops-sec{margin-top:8px; margin-bottom:40px}
+/* Inflation: boxes without outlines, no heavy rule under the list headings */
+#view[data-view="inflation"] :is(.card, .stat, .pill){border:0}
+#view[data-view="inflation"] .ledger{border-top:0}

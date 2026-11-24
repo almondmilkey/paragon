@@ -537,6 +537,18 @@ function guideSection(I){
   </div>`;
 }
 
+// gifts: still spending, counted everywhere as usual. This only says thank you.
+function giftLine(list, mk){
+  const y = mk.slice(0,4); let m = 0, yr = 0;
+  for (const r of list){ const rm = mkOf(r.date); if (!rm || rm.slice(0,4) !== y || rm > mk) continue;
+    const g = sum((r.items || []).filter(it => it.gift).map(it => num(it.price))); yr += g; if (rm === mk) m += g; }
+  if (yr < 0.01) return "";
+  const thanks = "Thank you for caring for others ♥";
+  return `<span class="gift-line">${m >= 0.01
+    ? `This month you spent <b class="num">${money(m)}</b> on gifts for others, <b class="num">${money(yr)}</b> so far in ${y}. ${thanks}`
+    : `So far in ${y} you've spent <b class="num">${money(yr)}</b> on gifts for others. ${thanks}`}</span>`;
+}
+
 function viewHome(A, list){
   const mk = S.month, M = A.months[mk] || {total:0, cats:{}, prods:{}, count:0, premium:0, premCats:{}, premProds:{}};
   const allM = monthList(A);
@@ -563,7 +575,7 @@ function viewHome(A, list){
   return `
   <div class="section">
     <div class="monthbar"><button class="chev" data-month="-1" ${pos<=0?"disabled":""} aria-label="Previous month">‹</button><span class="m">${mkLabel(mk,true)}</span><button class="chev" data-month="1" ${pos>=allM.length-1?"disabled":""} aria-label="Next month">›</button></div>
-    <div class="hero"><span class="label">Spent this month</span><span class="big num">${money(M.total)}</span>${vs}</div>
+    <div class="hero"><span class="label">Spent this month</span><span class="big num">${money(M.total)}</span>${vs}${giftLine(list, mk)}</div>
   </div>
   <div class="stats two">
     <div class="stat"><span class="label">Monthly avg</span><span class="v num">${avg?money(avg,0):"—"}</span></div>
@@ -848,12 +860,12 @@ function viewHistory(A, list){
   const mks = Object.keys(byM).sort().reverse();
   return `
   <div class="section"><div class="section-head"><h1>Receipts</h1><button class="btn ghost" data-action="manual" style="padding:8px 14px;font-size:.9rem">+ Add expense</button></div>
-  <span class="muted small">Tap a receipt to correct products, prices or categories.</span></div>
+  <span class="muted small receipts-hint">Tap a receipt to correct products, prices or categories.</span></div>
   ${!isDemo() && S.rules.length ? `<div class="section repeats"><div class="section-head"><h2>Monthly repeats</h2><span class="num muted">${money(sum(S.rules.map(itemsTotal)))} / month</span></div>
     <div class="ledger">${S.rules.map(R => `<div class="rule-row"><span class="st">${esc(R.store || R.items[0]?.product || "Expense")}</span><span class="num">${money(itemsTotal(R))}</span>
       <span class="meta">Every month on ${dayText(R.day)} · ${esc(untilText(R))}</span><button class="linkbtn" data-action="stoprule" data-rule="${esc(R.id)}">Stop</button></div>`).join("")}</div>
     <p class="small muted chart-note">Added automatically when the day arrives. To change the amount from now on, open the latest one below and tick “Use these details for future months”. Stopping keeps the months already added.</p></div>` : ""}
-  ${mks.map(mk => `<div class="section"><div class="section-head"><h2>${mkLabel(mk,true)}</h2><span class="num muted">${money(A.months[mk]?.total||0)}</span></div>
+  ${mks.map(mk => `<div class="section month-sec"><div class="section-head"><h2>${mkLabel(mk,true)}</h2><span class="num muted">${money(A.months[mk]?.total||0)}</span></div>
     <div class="ledger">${byM[mk].sort((a,b)=>byDate(b,a)).map(r=>{ const n = (r.items||[]).length, manual = r.source==="manual";
       return `<button class="receipt" data-receipt="${esc(r.id)}">
       <span class="st">${esc(r.store||"Expense")}</span><span class="num" style="font-family:var(--display)">${money(itemsTotal(r))}</span>
@@ -959,7 +971,8 @@ function renderEditor(){
         <select data-i="${i}" data-f="category" aria-label="Category">${CATS.map(([id,l])=>`<option value="${id}" ${id===it.category?"selected":""}>${l}</option>`).join("")}</select>
         <input data-i="${i}" data-f="qty" inputmode="decimal" value="${esc(it.qty)}" aria-label="Quantity">
         <select data-i="${i}" data-f="unit" aria-label="Unit">${UNITS.map(([id,l])=>`<option value="${id}" ${it.unit===id?"selected":""}>${l}</option>`).join("")}</select>
-      </div></div>`).join("")}</div>
+      </div>
+      <label class="check gift"><input type="checkbox" data-i="${i}" data-f="gift" ${it.gift ? "checked" : ""}> Mark product as a gift</label></div>`).join("")}</div>
     <button class="btn ghost" data-action="additem">+ Add line</button>
     ${D.source === "manual" && !D.demo ? repeatBlock(D) : ""}
     <div class="totals"><span>Total</span><span class="num" id="f-total">${money(total)}</span></div>
@@ -988,6 +1001,7 @@ function onEditorInput(e){
   if (el.name === "f-untilmode"){ const on = el.value === "date"; const u = $("#f-until"); if (u){ u.disabled = !on; if (on) u.focus(); } D.until = on ? (u?.value || "") : ""; return; }
   if (el.id === "f-until"){ D.until = el.value; return; }
   if (el.id === "f-store") D.store = el.value; else if (el.id === "f-date"){ D.date = el.value; if (D.repeat) renderEditorKeep(); }
+  else if (el.dataset.f === "gift"){ D.items[+el.dataset.i].gift = el.checked; return; }
   else if (el.dataset.f){ const it = D.items[+el.dataset.i]; const f = el.dataset.f;
     it[f] = el.value;
     if (f === "price" || f === "qty"){ const q = num(it.qty)||1; it.unitPrice = r2(num(it.price)/q); }
@@ -999,7 +1013,9 @@ async function saveDraft(){
   const D = S.draft; if (!D) return;
   const items = D.items.map(it => { const qty = num(it.qty)||1, price = r2(num(it.price));
     const product = key(it.product||it.name);
-    return {name: String(it.name||product).trim(), product, category: catOf(it.category), qty, unit: it.unit||"pcs", unitPrice: r2(price/qty), price}; })
+    const row = {name: String(it.name||product).trim(), product, category: catOf(it.category), qty, unit: it.unit||"pcs", unitPrice: r2(price/qty), price};
+    if (it.gift) row.gift = true;   // stored only when ticked, so older receipts need no change
+    return row; })
     .filter(it => it.product || it.price);
   if (!items.length){ toast("Add at least one line with a price."); return; }
   if (!D.date){ toast("Pick a date."); return; }
@@ -1367,7 +1383,7 @@ document.addEventListener("input", e => {
 document.addEventListener("change", async e => {
   if (e.target.id === "cur"){ S.currency = e.target.value; fmtCache = {}; render(); try { await persistProfile(); } catch(_){ toast("Couldn't save the currency."); } return; }
   if (e.target.id === "fileInput"){ const f = e.target.files?.[0]; if (f) runScan(f); return; }
-  if (S.draft && e.target.tagName === "SELECT") onEditorInput(e);
+  if (S.draft && (e.target.tagName === "SELECT" || e.target.dataset?.f === "gift")) onEditorInput(e);
 });
 document.addEventListener("toggle", e => { const k = e.target.dataset?.note; if (k) S.openNotes[e.target.open ? "add" : "delete"](k); }, true);
 document.addEventListener("keydown", e => { if (e.key === "Escape" && $("#sheetRoot").firstChild) closeSheet(); });

@@ -297,3 +297,11 @@ altcha-widget{display:block;
 #view[data-view="inflation"] :is(.card, .stat, .pill){border:0}
 #view[data-view="inflation"] .ledger{border-top:0}
 #view[data-view="inflation"] .infl-sec{margin-top:48px}
+/* Receipts: more air under the intro, no heavy rule under the month headings */
+.receipts-hint{margin-bottom:28px}
+#view[data-view="history"] .ledger{border-top:0}
+#view[data-view="history"] .month-sec{margin-top:40px}
+#view[data-view="history"] .section:first-child + .month-sec{margin-top:12px}   /* the intro already leaves 28px */
+.item .gift{grid-column:1 / 4; display:flex; gap:8px; align-items:center; font-size:.85rem; color:var(--muted)}
+.item .gift input{width:auto}
+.gift-line{display:block; margin-top:12px; font-size:.88rem; color:var(--muted); text-wrap:balance}

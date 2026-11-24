@@ -11,7 +11,7 @@ create table if not exists public.profiles (
 );
 
 -- 2. Receipts and manual expenses. Line items are stored as JSON:
---    [{name, product, category, qty, unit, unitPrice, price}, ...]
+--    [{name, product, category, qty, unit, unitPrice, price, gift?}, ...]   (gift: true when marked as a gift)
 create table if not exists public.receipts (
   id             uuid primary key default gen_random_uuid(),
   user_id        uuid not null default auth.uid() references auth.users (id) on delete cascade,

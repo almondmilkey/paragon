@@ -305,3 +305,12 @@ altcha-widget{display:block;
 .item .gift{grid-column:1 / 4; display:flex; gap:8px; align-items:center; font-size:.85rem; color:var(--muted)}
 .item .gift input{width:auto}
 .gift-line{display:block; margin-top:12px; font-size:.88rem; color:var(--muted); text-wrap:balance}
+
+/* receipt lines: kind and offer */
+.item .line3{grid-column:1 / 4; display:grid; grid-template-columns:1fr 1fr; gap:8px; align-items:center}
+.item .line3 .disc{display:flex; align-items:center; gap:6px; font-size:.8rem; color:var(--muted)}
+.item .line3 .disc input{text-align:right; font-variant-numeric:tabular-nums}
+/* Found for you */
+.found-row{display:flex; justify-content:space-between; align-items:baseline; gap:12px; padding:6px 0; border-top:1px solid var(--line)}
+.found-row .num{font-family:var(--display); white-space:nowrap}
+.found .premium-head .v{color:var(--ink)}

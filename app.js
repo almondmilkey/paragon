@@ -48,6 +48,37 @@ const fmtDate = iso => { if(!iso) return ""; const [y,m,d] = iso.split("-"); ret
 const rid = () => (crypto.randomUUID ? crypto.randomUUID() : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)));
 // total of a receipt, a repeat rule or the draft in the editor
 const itemsTotal = r => r2(sum((r.items||[]).map(i => num(i.price))));
+/* Three kinds of receipt lines (stored as items[].kind):
+   - "product" (the default, usually not stored): something you bought. price = what you paid after offers,
+     discount = what the offers saved you on that line (a positive amount, 0 when none).
+   - "deposit": a bottle deposit you paid (statiegeld, Pfand, kaucja). Not spending: you can get it back.
+   - "deposit_return": a deposit you got back (a negative amount on the receipt). Not a discount either:
+     it's your own money returning.
+   Older receipts stored deposits as a product called "bottle deposit"; they are read as deposits. */
+const kindOf = it => {
+  if (it.kind === "deposit" || it.kind === "deposit_return") return it.kind;
+  const p = key(it.product);
+  if (p === "bottle deposit") return num(it.price) < 0 ? "deposit_return" : "deposit";
+  if (p === "deposit return") return "deposit_return";
+  return "product";
+};
+// product lines only: what counts as spending everywhere (deposits are left out)
+const lines = r => (r.items || []).filter(it => kindOf(it) === "product");
+const discOf = it => Math.max(0, num(it.discount));
+// A discount on the whole receipt (a coupon, % off the total, loyalty points) is spread over the products in
+// proportion to their price, so every product carries its share and the lines still add up to the total paid.
+function spreadReceiptDiscount(items, amount){
+  const prods = items.filter(it => kindOf(it) === "product" && num(it.price) > 0);
+  const base = sum(prods.map(it => num(it.price)));
+  if (!(amount > 0) || !base) return;
+  let left = r2(Math.min(amount, base));
+  prods.forEach((it, i) => {
+    const want = i === prods.length - 1 ? left : r2(amount * num(it.price) / base);
+    const d = Math.min(want, num(it.price), left);
+    it.price = r2(num(it.price) - d); it.discount = r2(discOf(it) + d); left = r2(left - d);
+    it.unitPrice = r2(it.price / (num(it.qty) || 1));
+  });
+}
 const dayOf = iso => +String(iso).slice(8,10) || 1;
 const daysIn = mk => { const [y,m] = mk.split("-").map(Number); return new Date(y, m, 0).getDate(); };
 const catOf = c => CAT[c] ? c : "other";
@@ -89,12 +120,15 @@ function makeDemo(){
       P.forEach(([prod,name,cat,unit,base,[q0,q1],p]) => {
         if (rnd() > p) return;
         const months = 7-k; const g = .006 + (drift[prod]||0);
-        let unitPrice = base*mult*Math.pow(1+g, months)*(1+(rnd()-.5)*.03);
-        if (rnd() < .05) unitPrice *= .85; // promotion
-        unitPrice = r2(unitPrice);
+        const regUnit = r2(base*mult*Math.pow(1+g, months)*(1+(rnd()-.5)*.03));
         const qty = unit === "kg" ? r2(q0 + rnd()*(q1-q0)) : Math.round(q0 + rnd()*(q1-q0));
-        items.push({name, product:prod, category:cat, qty, unit, unitPrice, price:r2(qty*unitPrice)});
+        const regular = r2(qty*regUnit), discount = rnd() < .08 ? r2(regular*.2) : 0;   // promotion: 20% off
+        const it = {name, product:prod, category:cat, qty, unit, unitPrice:r2((regular-discount)/qty), price:r2(regular-discount)};
+        if (discount) it.discount = discount;
+        items.push(it);
+        if (prod === "sparkling water") items.push({name:"PFAND", product:"bottle deposit", category:"other", kind:"deposit", qty, unit:"pcs", unitPrice:.25, price:r2(qty*.25)});
       });
+      if (items.length && rnd() < .2) items.push({name:"LEERGUT", product:"deposit return", category:"other", kind:"deposit_return", qty:1, unit:"pcs", unitPrice:-1.25, price:-1.25});
       if (items.length) out.push({id:`demo-${mk}-${t}`, date:`${mk}-${pad(d)}`, store, items, source:"scan", demo:true});
     }
     const man = (day, store, product, cat, price) => { if (k===0 && day>now.getDate()) return; out.push({id:`demo-${mk}-${product}`, date:`${mk}-${pad(day)}`, store, source:"manual", demo:true, items:[{name:product, product, category:cat, qty:1, unit:"pcs", unitPrice:price, price}]}); };
@@ -115,17 +149,21 @@ function analyze(list){
   const months = {}, products = {};
   for (const r of list){
     const mk = mkOf(r.date); if (!mk) continue;
-    const M = months[mk] ||= {total:0, cats:{}, prods:{}, count:0, minDay:31, premium:0, premCats:{}, premProds:{}};
+    const M = months[mk] ||= {total:0, cats:{}, prods:{}, count:0, minDay:31, premium:0, premCats:{}, premProds:{}, offers:0, depPaid:0, depBack:0};
     M.count++; M.minDay = Math.min(M.minDay, dayOf(r.date));
-    for (const it of r.items || []){
-      const price = num(it.price); const cat = catOf(it.category);
-      M.total += price; M.cats[cat] = (M.cats[cat]||0) + price;
+    for (const it of r.items || []){ const k = kindOf(it);
+      if (k === "deposit") M.depPaid += num(it.price); else if (k === "deposit_return") M.depBack += Math.abs(num(it.price)); }
+    for (const it of lines(r)){
+      const price = num(it.price); const cat = catOf(it.category), disc = discOf(it);
+      M.total += price; M.offers += disc; M.cats[cat] = (M.cats[cat]||0) + price;
       const pk = key(it.product || it.name); if (!pk) continue;
       M.prods[pk] = (M.prods[pk]||0) + price;
       const P = products[pk] ||= {key:pk, label:it.product || it.name, category:cat, buys:[], total:0};
       P.total += price;
-      const qty = num(it.qty) || 1; const up = num(it.unitPrice) || (qty ? price/qty : price);
-      P.buys.push({date:r.date, mk, cat, price, qty, unit:it.unit||"pcs", unitPrice:up, store:r.store||""});
+      // unitPrice = the regular price per unit (before offers). Price comparisons (price premium, inflation, shops)
+      // use it, so a one-off promotion isn't mistaken for a price change; offers are counted on their own.
+      const qty = num(it.qty) || 1; const up = disc ? (price + disc)/qty : (num(it.unitPrice) || (qty ? price/qty : price));
+      P.buys.push({date:r.date, mk, cat, price, discount:disc, qty, unit:it.unit||"pcs", unitPrice:up, store:r.store||""});
     }
   }
   const mks = Object.keys(months).sort();
@@ -154,8 +192,8 @@ function analyze(list){
     P.share = mks.length ? P.monthsBought / mks.length : 0;
     P.perMonth = P.buys.length / Math.max(1, mks.length);
   }
-  // price premium: what you paid above the cheapest price you paid for the same product in the same month
-  // (compared per unit). Staying within one month keeps inflation from counting as a premium. Services and
+  // price premium: what you paid above the cheapest regular price you paid for the same product in the same month
+  // (compared per unit, before offers: what offers saved you is counted separately, never twice). Staying within one month keeps inflation from counting as a premium. Services and
   // fixed costs are left out (PREMIUM_OUT): there a different price usually means a different choice.
   let premium = 0;
   for (const P of Object.values(products)){
@@ -170,7 +208,9 @@ function analyze(list){
   }
   const staples = Object.values(products).filter(P => P.category !== "housing" && mks.length >= 2 && P.monthsBought >= 2 && P.share > .5)
     .sort((a,b)=> b.share - a.share || b.total - a.total);
-  return {months, mks, completeMks, stats, products, staples, curMk, premium};
+  const allM = Object.values(months);
+  const offers = sum(allM.map(M => M.offers)), deposit = {paid: sum(allM.map(M => M.depPaid)), back: sum(allM.map(M => M.depBack))};
+  return {months, mks, completeMks, stats, products, staples, curMk, premium, offers, deposit};
 }
 // every month you can step through on Home: all months with receipts, plus the running one
 const monthList = A => A.mks.includes(A.curMk) ? A.mks : [...A.mks, A.curMk];
@@ -178,7 +218,8 @@ const monthList = A => A.mks.includes(A.curMk) ? A.mks : [...A.mks, A.curMk];
 /* Personal price index, chained month to month. Each month, every product bought in both that month and the one
    before is compared on price per unit, weighted by what you spent on it.
    sameShop: true → only the same product at the same shop counts: pure price change (inflation), the same rule as
-     "Why your spending changed" on Overview. Promotions at that shop still count, they're prices you paid.
+     "Why your spending changed" on Overview. Prices are regular prices (before offers), so a promotion isn't
+     counted as a price change: what offers saved you shows up separately ("Offers" and "Found for you").
    sameShop: false → the price you paid wherever you bought it, so switching shops moves it too.
    The gap between the two is what your choice of shop added or saved. */
 const NO_INDEX = new Set(["housing","eating_out","clothes_and_shoes","leisure","health","transport"]);
@@ -243,11 +284,13 @@ function priceMovers(A){
   return out;
 }
 
-/* why spending changed: a month vs. the previous one, split into inflation / where you shop / habits.
-   Price effect per product (Bennet): (p1 - p0) * (q0 + q1)/2. The part of it seen at the same place in both
-   months is inflation, the rest comes from switching places. Everything else (quantities, new or dropped
-   products) is habits, so the three parts add up exactly to the change. The running month is compared with
-   the same days of the previous month. */
+/* why spending changed: a month vs. the previous one, split into inflation / where you shop / offers / habits.
+   Spending is what you paid (after offers). Prices are compared as regular prices (before offers).
+   Price effect per product (Bennet): (p1 - p0) * (q0 + q1)/2, with p = regular price per unit. The part of it seen
+   at the same place in both months is inflation, the rest comes from switching places. Offers = how much less
+   (or more) you saved with offers than the month before. Everything else (quantities, new or dropped products)
+   is habits, so the four parts add up exactly to the change. The running month is compared with the same days
+   of the previous month. Bottle deposits are left out: they're not spending. */
 function decompose(list, mk, curMk){
   const prevMk = addMonths(mk, -1), cut = mk === curMk ? +todayISO().slice(8,10) : 31;
   const per = [{}, {}], tot = [0, 0];
@@ -255,28 +298,29 @@ function decompose(list, mk, curMk){
     const m = mkOf(r.date), t = m === prevMk ? 0 : m === mk ? 1 : -1; if (t < 0) continue;
     if (dayOf(r.date) > cut) continue;
     const st = key(r.store);
-    for (const it of r.items || []){
-      const price = num(it.price); tot[t] += price;
+    for (const it of lines(r)){
+      const price = num(it.price), disc = discOf(it), reg = price + disc; tot[t] += price;
       const pk = key(it.product || it.name); if (!pk) continue;
-      const q = num(it.qty) || 1, G = per[t][pk + "|" + (it.unit || "pcs")] ||= {l:it.product || it.name, q:0, e:0, st:{}};
-      G.q += q; G.e += price; const X = G.st[st] ||= {q:0, e:0}; X.q += q; X.e += price;
+      const q = num(it.qty) || 1, G = per[t][pk + "|" + (it.unit || "pcs")] ||= {l:it.product || it.name, q:0, e:0, r:0, d:0, st:{}};
+      G.q += q; G.e += price; G.r += reg; G.d += disc; const X = G.st[st] ||= {q:0, r:0}; X.q += q; X.r += reg;
     }
   }
   const D = {prevMk, cut, e0:tot[0], e1:tot[1]}; if (!tot[0]) return D;
-  let infl = 0, stores = 0; const drv = {};
+  let infl = 0, stores = 0, offers = 0; const drv = {};
   for (const k of new Set([...Object.keys(per[0]), ...Object.keys(per[1])])){
-    const a = per[0][k], b = per[1][k], dv = drv[k] = {l:(b || a).l, change:(b ? b.e : 0) - (a ? a.e : 0), infl:0, stores:0};
-    dv.habits = dv.change;
+    const a = per[0][k], b = per[1][k];
+    const dv = drv[k] = {l:(b || a).l, change:(b ? b.e : 0) - (a ? a.e : 0), infl:0, stores:0, offers: -((b ? b.d : 0) - (a ? a.d : 0))};
+    offers += dv.offers; dv.habits = dv.change - dv.offers;
     if (!a || !a.q || !b || !b.q) continue;
-    const qm = (a.q + b.q)/2, priceEff = (b.e/b.q - a.e/a.q) * qm;
+    const qm = (a.q + b.q)/2, priceEff = (b.r/b.q - a.r/a.q) * qm;
     let w = 0, d = 0;
-    for (const s in b.st){ const x = a.st[s], y = b.st[s]; if (!x || !x.q || !y.q) continue; const ws = (x.q + y.q)/2; w += ws; d += ws * (y.e/y.q - x.e/x.q); }
+    for (const s in b.st){ const x = a.st[s], y = b.st[s]; if (!x || !x.q || !y.q) continue; const ws = (x.q + y.q)/2; w += ws; d += ws * (y.r/y.q - x.r/x.q); }
     const inf = w ? d/w * qm : 0; infl += inf; stores += priceEff - inf;
-    dv.infl = inf; dv.stores = priceEff - inf; dv.habits = dv.change - priceEff;
+    dv.infl = inf; dv.stores = priceEff - inf; dv.habits = dv.change - priceEff - dv.offers;
   }
-  D.drivers = Object.values(drv).filter(x => Math.abs(x.change) >= 0.005 || Math.abs(x.infl) + Math.abs(x.stores) >= 0.005)
+  D.drivers = Object.values(drv).filter(x => Math.abs(x.change) >= 0.005 || Math.abs(x.infl) + Math.abs(x.stores) + Math.abs(x.offers) >= 0.005)
     .sort((x,y) => Math.abs(y.change) - Math.abs(x.change)).slice(0, 3);
-  D.change = tot[1] - tot[0]; D.infl = infl; D.stores = stores; D.habits = D.change - infl - stores;
+  D.change = tot[1] - tot[0]; D.infl = infl; D.stores = stores; D.offers = offers; D.habits = D.change - infl - stores - offers;
   return D;
 }
 
@@ -345,7 +389,7 @@ function cumDays(list, mk, withFixed){
   for (const r of list){
     if (mkOf(r.date) !== mk) continue;
     const d = Math.min(n, dayOf(r.date));
-    for (const it of r.items || []){ if (!withFixed && FIXED_COSTS.includes(catOf(it.category))) continue; a[d] += num(it.price); }
+    for (const it of lines(r)){ if (!withFixed && FIXED_COSTS.includes(catOf(it.category))) continue; a[d] += num(it.price); }
   }
   for (let d = 1; d <= 31; d++) a[d] += a[d-1];
   return a;
@@ -442,10 +486,11 @@ function homeInsights(A, list, mk, D){
   // 3. prices, shops or habits? (this month vs. the previous one)
   if (D.e0){
     const since = isCur ? `the same days of ${mkLabel(D.prevMk,true)}` : mkLabel(D.prevMk,true);
-    const parts = [["prices", D.infl], ["shops", D.stores], ["habits", D.habits]];
+    const parts = [["prices", D.infl], ["shops", D.stores], ["offers", D.offers], ["habits", D.habits]];
     const main = parts.reduce((x,y) => Math.abs(y[1]) > Math.abs(x[1]) ? y : x);
     const expl = {prices: `price changes (the same products at the same shops cost ${main[1] >= 0 ? "more" : "less"})`,
       shops: `where you shop (the same products bought at ${main[1] >= 0 ? "pricier" : "cheaper"} places)`,
+      offers: `offers (you saved ${main[1] >= 0 ? "less" : "more"} with promotions than before)`,
       habits: `your habits (buying ${main[1] >= 0 ? "more or different" : "less or different"} things)`}[main[0]];
     I.mainCause = main[0]; I.mainVal = main[1];
     I.top = D.drivers?.[0] && Math.abs(D.drivers[0].change) >= 1 ? D.drivers[0] : null;
@@ -522,7 +567,7 @@ function guideSection(I){
   const steps = [
     step("Is this month unusual?", I.unusual),
     step("Is it a one-off or a trend?", I.trend),
-    step("Prices, shops or habits?", I.why ? I.why + (I.infl ? ` ${I.infl}` : "") : ""),
+    step("Prices, shops, offers or habits?", I.why ? I.why + (I.infl ? ` ${I.infl}` : "") : ""),
     step("Where does the money go?", I.where),
     step("Paying more than you need to?", I.premium),
     step("Could you pay less for the same things?", save.shops),
@@ -541,7 +586,7 @@ function guideSection(I){
 function giftLine(list, mk){
   const y = mk.slice(0,4); let m = 0, yr = 0;
   for (const r of list){ const rm = mkOf(r.date); if (!rm || rm.slice(0,4) !== y || rm > mk) continue;
-    const g = sum((r.items || []).filter(it => it.gift).map(it => num(it.price))); yr += g; if (rm === mk) m += g; }
+    const g = sum(lines(r).filter(it => it.gift).map(it => num(it.price))); yr += g; if (rm === mk) m += g; }
   if (yr < 0.01) return "";
   const thanks = "Thank you for caring for others ♥";
   return `<span class="gift-line">${m >= 0.01
@@ -562,7 +607,7 @@ function viewHome(A, list){
     const open = S.openCat === c;
     let sub = "";
     if (open){ const items = {};
-      list.filter(r=>mkOf(r.date)===mk).forEach(r => (r.items||[]).forEach(it => { if (catOf(it.category)===c){ const k = key(it.product||it.name); items[k] = items[k] || {k, l:it.product||it.name, v:0, n:0}; items[k].v += num(it.price); items[k].n++; } }));
+      list.filter(r=>mkOf(r.date)===mk).forEach(r => lines(r).forEach(it => { if (catOf(it.category)===c){ const k = key(it.product||it.name); items[k] = items[k] || {k, l:it.product||it.name, v:0, n:0}; items[k].v += num(it.price); items[k].n++; } }));
       sub = `<div class="sub">${Object.values(items).sort((a,b)=>b.v-a.v).map(i=>`<div><span>${esc(i.l)}${i.n>1?` <span class="muted">×${i.n}</span>`:""}</span><span class="num">${M.premProds[i.k]?`<span class="prem">premium ${money(M.premProds[i.k])}</span> `:""}${money(i.v)}</span></div>`).join("")}</div>`; }
     return `<button class="row" data-cat="${c}" aria-expanded="${open}"><span class="chev-r">›</span><span class="name">${esc(CAT[c])}</span><span class="amt">${money(v)}${M.premCats[c]?`<small class="prem">premium ${money(M.premCats[c])}</small>`:""}</span><span class="meter"><i style="width:${(v/top*100).toFixed(1)}%"></i></span></button>${sub}`;
   }).join("");
@@ -586,6 +631,7 @@ function viewHome(A, list){
     ${n?`<details class="more" data-note="stats"${S.openNotes.has("stats")?" open":""}><summary class="small muted">How these are worked out</summary>
       <div class="stats two"><div class="stat"><span class="label">Std deviation</span><span class="v num">${s?"± "+money(s,0):"—"}</span></div></div>
       <p class="small muted">Based on ${n} complete month${plural(n)}. The current month, and a first month you only partly tracked, are left out.</p>
+      <p class="small muted">Spending is what you paid, after offers. Bottle deposits aren't counted, because you get them back.</p>
       <p class="small muted">Standard deviation shows how much your monthly spending varies from the average, so you can tell whether a month is usual or unusual. The typical range is the average plus or minus one standard deviation.</p>
     </details>`:""}
   </div>
@@ -607,19 +653,39 @@ function viewHome(A, list){
       <p class="small muted">Products you bought in more than half of your months. One-off purchases, like clothes, and services, like eating out or transport, aren't here: you'll find them under Spending per category. A year is your average month for that product, times 12.</p>
       <p class="small muted">For every product ranked by what it costs you, see <button class="linkbtn" data-nav="products">All products</button> on Products.</p>
     </details></div>`:""}
-  <div class="premium" id="sec-premium">
-    <div class="premium-head"><span class="label">Paid above your best price · ${esc(mkLabel(mk,true))}</span><span class="v num">${money(M.premium)}</span></div>
-    <p class="takeaway">${I.premium}</p>
-    ${A.premium ? `<details class="more" data-note="premium"${S.openNotes.has("premium")?" open":""}><summary class="small muted">What this means</summary>
-      <p class="small muted">Also called the price premium. What you'd have saved by always paying your lowest price for products you bought more than once. All time: <b class="num">${money(A.premium)}</b>.</p>
-      <p class="small muted">Each purchase is compared with the lowest price you paid for the same product in the same month, so price rises over time (inflation) don't count as a premium. Left out: ${esc(catList(PREMIUM_OUT))}. These are services and fixed costs, where a different price usually means a different choice, like another restaurant or a new flat. Products you bought only once are left out too.</p>
-    </details>` : `<span class="small muted">Appears once you've bought the same product at different prices in the same month.</span>`}
-  </div>
+  ${foundSection(A, M, mk, I)}
   ${paceSection(A, list, mk)}
   <div class="section" id="sec-months"><h2>Month by month</h2>${barChart(A, mk)}
     ${I.trend ? `<p class="takeaway">${I.trend}</p>` : ""}
     <details class="more chart-note" data-note="months"${S.openNotes.has("months")?" open":""}><summary class="small muted">How to read this chart</summary><p class="small muted">Bars: monthly totals. Dashed line: your monthly average. Includes every category, rent and bills too.</p></details></div>
   ${typeProgressSection()}`;
+}
+
+/* ---------- Found for you ----------
+   One equation ties it together, for every product you buy:
+     what you paid = your best regular price + paid above your best price − saved with offers
+   Saved with offers: money you already kept (discounts printed on your receipts).
+   Paid above your best price (price premium): money you could still keep, by paying your lowest regular price.
+   Bottle deposits are neither: they're your own money, waiting to be returned. */
+function foundSection(A, M, mk, I){
+  const off = M.offers || 0, prem = M.premium || 0, y = mk.slice(0,4);
+  const yr = Object.entries(A.months).filter(([m]) => m.slice(0,4) === y && m <= mk);
+  const depPaidY = sum(yr.map(([,X]) => X.depPaid || 0)), depBackY = sum(yr.map(([,X]) => X.depBack || 0));
+  const depOpen = Math.max(0, A.deposit.paid - A.deposit.back);
+  const dep = A.deposit.paid > 0 ? `<div class="found-row dep"><span>Bottle deposit to get back<br><span class="small muted">paid in ${y}: ${money(depPaidY)} · returned: ${money(depBackY)}</span></span><span class="num">${money(depOpen)}</span></div>` : "";
+  return `<div class="premium found" id="sec-premium">
+    <div class="premium-head"><span class="label">Found for you · ${esc(mkLabel(mk,true))}</span><span class="v num">${money(off + prem)}</span></div>
+    <div class="found-row"><span>Saved with offers<br><span class="small muted">already in your pocket</span></span><span class="num chg down">${money(off)}</span></div>
+    <div class="found-row"><span>Paid above your best price<br><span class="small muted">you could still save this</span></span><span class="num chg ${prem >= 0.005 ? "up" : "flat"}">${money(prem)}</span></div>
+    ${dep}
+    <p class="takeaway">${I.premium}</p>
+    <details class="more" data-note="premium"${S.openNotes.has("premium")?" open":""}><summary class="small muted">How this is worked out</summary>
+      <p class="small muted"><b>The equation behind it:</b> for every product, <i>what you paid = your best regular price + paid above your best price − saved with offers</i>. The regular price is the price before offers. So “Found for you” is both the money offers already saved you and the money you could still save by paying your best price. Nothing is counted twice.</p>
+      <p class="small muted"><b>Saved with offers</b> adds up the discounts on your receipts: promotions, bonus or loyalty-card prices, “2 for 1”, and coupons on the whole receipt (spread over its products in proportion to their price). All time: <b class="num">${money(A.offers)}</b>.</p>
+      <p class="small muted"><b>Paid above your best price</b>, also called the price premium: what you'd have saved by always paying your lowest regular price for the same product in the same month. Comparing within one month means price rises over time (inflation) don't count, and using regular prices means a promotion you didn't catch doesn't count either. Left out: ${esc(catList(PREMIUM_OUT))}. These are services and fixed costs, where a different price usually means a different choice, like another restaurant or a new flat. Products you bought only once are left out too. All time: <b class="num">${money(A.premium)}</b>.</p>
+      <p class="small muted"><b>Bottle deposits</b> (statiegeld, Pfand, kaucja) aren't spending and aren't savings: you paid them, and you can get them back. They're left out of all totals and charts. “To get back” is what you paid in deposits minus the returns printed on your receipts, all time. If you return bottles for cash or a voucher that doesn't show up on a receipt, the real amount is lower.</p>
+    </details>
+  </div>`;
 }
 
 function decompSection(A, list, mk, D, I){
@@ -629,21 +695,21 @@ function decompSection(A, list, mk, D, I){
   let body;
   if (!D.e0) body = `<div class="empty">Add receipts from ${esc(prevL)} to see what drove the change.</div>`;
   else {
-    const rows = [["Inflation","same product, same place",D.infl],["Where you shop","same product, different place",D.stores],["Your habits","what and how much you buy",D.habits]];
+    const rows = [["Inflation","same product, same place",D.infl],["Where you shop","same product, different place",D.stores],["Offers","more or less saved with promotions",D.offers],["Your habits","what and how much you buy",D.habits]];
     const mx = Math.max(...rows.map(r => Math.abs(r[2])), 1e-9);
     const amt = v => `${v >= 0 ? "+" : "−"}${money(Math.abs(v))}`;
-    body = `<p class="decomp-lead">${sofar ? `So far in ${esc(mkLabel(mk,true))}` : `In ${esc(mkLabel(mk,true))}`} you spent <b class="chg ${chgClass(D.change/D.e0)}">${pctS(D.change/D.e0)}</b> vs. ${esc(base)}: <b>${pctS(D.infl/D.e0)}</b> due to inflation, <b>${pctS(D.stores/D.e0)}</b> to where you shop and <b>${pctS(D.habits/D.e0)}</b> to your habits.</p>
+    body = `<p class="decomp-lead">${sofar ? `So far in ${esc(mkLabel(mk,true))}` : `In ${esc(mkLabel(mk,true))}`} you spent <b class="chg ${chgClass(D.change/D.e0)}">${pctS(D.change/D.e0)}</b> vs. ${esc(base)}: <b>${pctS(D.infl/D.e0)}</b> due to inflation, <b>${pctS(D.stores/D.e0)}</b> to where you shop, <b>${pctS(D.offers/D.e0)}</b> to offers and <b>${pctS(D.habits/D.e0)}</b> to your habits.</p>
     <table class="mini decomp"><tbody>${rows.map(([l,sub,v]) => `<tr><td>${l}<br><span class="small muted">${sub}</span></td><td class="dbar" aria-hidden="true"><i class="${v >= 0 ? "pos" : "neg"}" style="width:${(Math.abs(v)/mx*50).toFixed(1)}%"></i></td><td class="chg ${chgClass(v/D.e0)}">${amt(v)}<br><span class="small">${pctS(v/D.e0)}</span></td></tr>`).join("")}
       <tr class="tot"><td>Total change</td><td></td><td class="chg ${chgClass(D.change/D.e0)}">${amt(D.change)}<br><span class="small">${pctS(D.change/D.e0)}</span></td></tr></tbody></table>
     ${D.drivers.length ? `<details class="drivers-fold" data-note="drivers"${S.openNotes.has("drivers")?" open":""}><summary><h3 class="drivers-head">Biggest drivers</h3></summary><table class="mini drivers"><tbody>${D.drivers.map(x => {
-      const parts = [["inflation",x.infl],["where you shop",x.stores],["habits",x.habits]].filter(([,v]) => Math.abs(v) >= 0.005)
+      const parts = [["inflation",x.infl],["where you shop",x.stores],["offers",x.offers],["habits",x.habits]].filter(([,v]) => Math.abs(v) >= 0.005)
         .map(([n,v]) => `<span class="chg ${chgClass(v)}">${amt(v)}</span> ${n}`).join(" · ");
       return `<tr><td><span style="text-transform:capitalize">${esc(x.l)}</span><br><span class="small muted">${parts}</span></td><td class="chg ${chgClass(x.change)}">${amt(x.change)}</td></tr>`; }).join("")}</tbody></table></details>` : ""}`;
   }
   const take = D.e0 && I.why ? `<p class="takeaway">${I.why}${I.topTxt ? ` ${I.topTxt}` : ""}</p>` : "";
   return `<div class="section decomp-sec" id="sec-why"><div class="section-head"><h2>Why your spending changed</h2></div>${body}${take}
     ${I.infl ? `<p class="small muted bridge">${I.infl} <button class="linkbtn" data-nav="inflation">See your inflation</button></p>` : ""}
-    <details class="more" data-note="decomp"${S.openNotes.has("decomp")?" open":""}><summary class="small muted">How this is worked out</summary><p class="small muted decomp-note">Compared with the previous month. The current month is compared only with the same days of last month (e.g. 1–11 Nov vs. 1–11 Oct), so an unfinished month doesn't bias the results. A price change counts as inflation only when you bought the same product at the same place in both months. If you have lunch at two different restaurants, the difference in price isn't counted as inflation, because the restaurants are different by design: it shows up under “Where you shop”.</p></details></div>`;
+    <details class="more" data-note="decomp"${S.openNotes.has("decomp")?" open":""}><summary class="small muted">How this is worked out</summary><p class="small muted decomp-note">Compared with the previous month. The current month is compared only with the same days of last month (e.g. 1–11 Nov vs. 1–11 Oct), so an unfinished month doesn't bias the results. A price change counts as inflation only when you bought the same product at the same place in both months. If you have lunch at two different restaurants, the difference in price isn't counted as inflation, because the restaurants are different by design: it shows up under “Where you shop”.</p><p class="small muted decomp-note">Prices are compared as regular prices, before offers. What offers saved you is its own part: “Offers” is positive when you saved less with promotions than the month before (so you paid more), and negative when you saved more. Everything else, like buying more, less or different things, is “Your habits”. The four parts add up exactly to the total change. Bottle deposits aren't counted: they're not spending, because you get them back.</p></details></div>`;
 }
  
 function productRow(P){
@@ -686,7 +752,7 @@ function bigSpending(A, list){
   for (const r of list){
     const mk = mkOf(r.date); if (!W.has(mk) || r.recurringId) continue;
     const per = {};
-    for (const it of r.items || []){ const c = catOf(it.category); if (BIG_CATS.includes(c)) per[c] = (per[c]||0) + num(it.price); }
+    for (const it of lines(r)){ const c = catOf(it.category); if (BIG_CATS.includes(c)) per[c] = (per[c]||0) + num(it.price); }
     for (const [c, v] of Object.entries(per)){ if (v <= 0) continue; const X = C[c] ||= {c, visits:0, e:0, ms:new Set(), amts:[], perMk:{}}; X.visits++; X.e += v; X.ms.add(mk); X.amts.push(v); X.perMk[mk] = (X.perMk[mk]||0) + 1; }
   }
   // once a month at (almost) the same amount looks like a pass or subscription that wasn't added as a monthly repeat
@@ -703,7 +769,7 @@ function shopIndex(A, list){
   // share of your shopping: everything you bought as products (services and fixed costs left out)
   for (const r of list){
     if (!W.has(mkOf(r.date)) || !r.store) continue;
-    const v = sum((r.items || []).filter(it => !NOT_PRODUCTS.includes(catOf(it.category))).map(it => num(it.price)));
+    const v = sum(lines(r).filter(it => !NOT_PRODUCTS.includes(catOf(it.category))).map(it => num(it.price)));
     if (v <= 0) continue;
     const X = sh[key(r.store)] ||= {name:r.store, spend:0, w:0, rel:0, prods:0};
     X.spend += v; productTot += v;
@@ -766,7 +832,7 @@ function savingsSection(A, list){
     </tbody></table>
     <p class="takeaway">Buying these where they're cheapest for you could save about <b class="num">${money(R.total,0)}</b> a year, without buying less.</p>
     <details class="more" data-note="save-shop"${S.openNotes.has("save-shop")?" open":""}><summary class="small muted">How this is estimated</summary>
-      <p class="small muted">For each product you buy regularly, we take your average price per kg, litre or piece over ${basis} and the average at the shop where it's cheapest for you. Averages, not your single best deal, because a one-off promotion can't be repeated every time.</p>
+      <p class="small muted">For each product you buy regularly, we take your average price per kg, litre or piece over ${basis} and the average at the shop where it's cheapest for you. Averages, not your single best deal, because a one-off promotion can't be repeated every time. Prices are regular prices, before offers.</p>
       <p class="small muted">Save per year = (your average price − the price at the cheapest shop) × how much you buy in an average month × 12. It assumes you keep buying the same amounts, just at the cheaper shop.</p>
       <p class="small muted">Only products you bought at two or more shops can be compared, and only savings of ${money(5,0)} a year or more are shown.${R.oneShop ? ` ${R.oneShop} regular product${plural(R.oneShop)} you always buy at the same shop ${R.oneShop === 1 ? "isn't" : "aren't"} here.` : ""} Tap a product to see all its shops.</p>
     </details>` : "";
@@ -842,7 +908,7 @@ function viewInflation(A){
   <div class="section spaced" style="margin-top:16px"><details class="more" data-note="inflation"${S.openNotes.has("inflation")?" open":""}><summary class="small muted">Show the chart and notes</summary>
     <span class="label">Price index, same product at the same shop, ${mkLabel(pts[0].mk)} = 100</span>${lineChart(pts, {base:100, label:"Personal price index"})}
     <p class="small muted chart-note">Dashed line: 100, your starting level. Only products you bought at the same shop in two different months count (${I.count} so far). Left out: ${esc(catList([...NO_INDEX]))}, because their prices can't be compared like for like.</p>
-    <p class="small muted chart-note"><mark class="hl">Promotions count, because they're prices you paid at that shop. Switching shops doesn't: that's your choice, shown separately above.</mark> “About ${money(Math.abs(extra),0)} a year” is what the same products cost you in a year now, compared with the prices back then.</p>
+    <p class="small muted chart-note"><mark class="hl">Prices are compared as regular prices, before offers, so a promotion doesn't count as a price change: what offers saved you is shown under “Found for you” on Overview. Switching shops doesn't count either: that's your choice, shown separately above.</mark> “About ${money(Math.abs(extra),0)} a year” is what the same products cost you in a year now, compared with the prices back then.</p>
   </details></div>
   <div class="section infl-sec"><h2>Biggest price rises</h2><div class="ledger">${up.map(moverRow).join("") || `<div class="empty">No price rises yet.</div>`}</div>
     ${up.length ? `<p class="takeaway"><b style="text-transform:capitalize">${esc(up[0].P.label)}</b> costs you the most extra: about ${money(up[0].year,0)} a year.${up[0].cheaper ? ` It's cheaper now at ${esc(up[0].cheaper.name)}.` : ""}</p>` : ""}</div>
@@ -932,6 +998,8 @@ function sheetProduct(k){
   if (P.sdUnit && P.avgUnit) { const cv = P.sdUnit/P.avgUnit; notes.push(cv < .04 ? "Price is very stable." : cv < .1 ? "Price moves a little between shops and weeks." : "Price varies a lot: promotions or shop choice matter here."); }
   if (P.stores.length > 1){ const [cs, cp] = P.stores[0], [es, ep] = P.stores[P.stores.length-1]; notes.push(`Cheapest at ${cs} (${money(cp)}), dearest at ${es} (${money(ep)}): ${pct(ep/cp-1,0)}.`); }
   if (Math.abs(P.lastVsAvg) > .03) notes.push(`Last time you paid ${pct(P.lastVsAvg,0)} ${P.lastVsAvg>0?"more":"less"} than usual.`);
+  const offSum = sum(P.buys.map(b => b.discount || 0));
+  if (offSum >= 0.01) notes.push(`Offers saved you ${money(offSum)} on it so far.`);
   notes.push(`You buy it about ${P.perMonth >= 1 ? P.perMonth.toFixed(1)+"× a month" : "once every "+Math.round(1/P.perMonth)+" months"}, ${money(P.total/Math.max(1,A.mks.length))} a month on average.`);
   openSheet(`${sheetHead(esc(P.label), ` style="text-transform:capitalize"`)}
     <span class="small muted">${esc(CAT[P.category])} · ${P.buys.length} purchases · ${money(P.total)} total</span>
@@ -940,7 +1008,7 @@ function sheetProduct(k){
       <div class="stat"><span class="label">Range</span><span class="v num" style="font-size:.95rem">${money(P.minUnit)}–${money(P.maxUnit)}</span></div>
       <div class="stat"><span class="label">Change, same shop</span><span class="v num chg ${P.change==null?"flat":chgClass(P.change)}">${P.change==null?"—":pct(P.change)}</span></div>
     </div>
-    ${pts.length>1?`<div class="section"><span class="label">Price per ${unit}, each purchase</span>${lineChart(pts,{fmt:v=>money(v), label:"Price history"})}<span class="small muted chart-note">Each point is one purchase, as price per ${unit}, at any shop. Nothing is left out. “Change, same shop” compares your first and last month at the same shop within the last 12 months, the same way as on Inflation, so a cheaper or pricier shop doesn't count as a price change.</span></div>`:""}
+    ${pts.length>1?`<div class="section"><span class="label">Price per ${unit}, each purchase</span>${lineChart(pts,{fmt:v=>money(v), label:"Price history"})}<span class="small muted chart-note">Each point is one purchase, as the regular price per ${unit} (before offers), at any shop. Nothing is left out. “Change, same shop” compares your first and last month at the same shop within the last 12 months, the same way as on Inflation, so a cheaper or pricier shop doesn't count as a price change.</span></div>`:""}
     <div class="card small no-outline" style="display:flex;flex-direction:column;gap:6px">${notes.map(n=>`<span>${esc(n)}</span>`).join("")}</div>
     ${P.stores.length?`<table class="mini"><thead><tr><th>Shop</th><th>Bought</th><th>Avg / ${unit}</th></tr></thead><tbody>${P.stores.map(([s,p,n])=>`<tr><td>${esc(s)}</td><td class="muted">${n}×</td><td>${money(p)}</td></tr>`).join("")}</tbody></table>`:""}`);
 }
@@ -953,6 +1021,7 @@ function renderEditorKeep(){ const sc = document.querySelector(".sheet")?.scroll
 const mismatchWarn = (D, total) => D.printedTotal && Math.abs(D.printedTotal - total) > .02
   ? `<div class="warn">The receipt says ${money(D.printedTotal)}, the lines add up to ${money(total)}. A line may be missing or misread.</div>` : "";
 const UNITS = [["pcs","pcs"],["kg","kg"],["l","litre"]];
+const KINDS = [["product","Product"],["deposit","Bottle deposit"],["deposit_return","Deposit returned"]];
 function renderEditor(){
   const D = S.draft; const total = itemsTotal(D);
   const isNew = !D.id;
@@ -972,7 +1041,11 @@ function renderEditor(){
         <input data-i="${i}" data-f="qty" inputmode="decimal" value="${esc(it.qty)}" aria-label="Quantity">
         <select data-i="${i}" data-f="unit" aria-label="Unit">${UNITS.map(([id,l])=>`<option value="${id}" ${it.unit===id?"selected":""}>${l}</option>`).join("")}</select>
       </div>
-      <label class="check gift"><input type="checkbox" data-i="${i}" data-f="gift" ${it.gift ? "checked" : ""}> Mark product as a gift</label></div>`).join("")}</div>
+      <div class="line3">
+        <select data-i="${i}" data-f="kind" aria-label="Kind of line">${KINDS.map(([id,l])=>`<option value="${id}" ${kindOf(it)===id?"selected":""}>${l}</option>`).join("")}</select>
+        ${kindOf(it) === "product" ? `<label class="disc"><span>Saved</span><input data-i="${i}" data-f="discount" inputmode="decimal" value="${esc(it.discount||"")}" placeholder="0.00" aria-label="Discount on this line"></label>` : `<span class="small muted">${kindOf(it) === "deposit" ? "Not counted as spending" : "Your deposit back, not a discount"}</span>`}
+      </div>
+      ${kindOf(it) === "product" ? `<label class="check gift"><input type="checkbox" data-i="${i}" data-f="gift" ${it.gift ? "checked" : ""}> Mark product as a gift</label>` : ""}</div>`).join("")}</div>
     <button class="btn ghost" data-action="additem">+ Add line</button>
     ${D.source === "manual" && !D.demo ? repeatBlock(D) : ""}
     <div class="totals"><span>Total</span><span class="num" id="f-total">${money(total)}</span></div>
@@ -1004,6 +1077,10 @@ function onEditorInput(e){
   else if (el.dataset.f === "gift"){ D.items[+el.dataset.i].gift = el.checked; return; }
   else if (el.dataset.f){ const it = D.items[+el.dataset.i]; const f = el.dataset.f;
     it[f] = el.value;
+    if (f === "kind"){ if (el.value === "deposit_return" && num(it.price) > 0) it.price = -num(it.price);
+      if (el.value !== "deposit_return" && num(it.price) < 0) it.price = -num(it.price);
+      if (el.value !== "product"){ delete it.discount; delete it.gift; if (!it.product) it.product = el.value === "deposit" ? "bottle deposit" : "deposit return"; }
+      renderEditorKeep(); return; }
     if (f === "price" || f === "qty"){ const q = num(it.qty)||1; it.unitPrice = r2(num(it.price)/q); }
     const total = itemsTotal(D); const t = $("#f-total"); if (t) t.textContent = money(total);
     const w = $("#f-warn"); if (w) w.innerHTML = mismatchWarn(D, total);
@@ -1011,10 +1088,13 @@ function onEditorInput(e){
 }
 async function saveDraft(){
   const D = S.draft; if (!D) return;
-  const items = D.items.map(it => { const qty = num(it.qty)||1, price = r2(num(it.price));
-    const product = key(it.product||it.name);
-    const row = {name: String(it.name||product).trim(), product, category: catOf(it.category), qty, unit: it.unit||"pcs", unitPrice: r2(price/qty), price};
-    if (it.gift) row.gift = true;   // stored only when ticked, so older receipts need no change
+  const items = D.items.map(it => { const qty = num(it.qty)||1, kind = kindOf(it);
+    // a returned deposit is stored as a negative amount, everything else as positive
+    let price = r2(num(it.price)); if (kind === "deposit_return") price = -Math.abs(price); else if (kind === "deposit") price = Math.abs(price);
+    const product = key(it.product||it.name) || (kind === "deposit" ? "bottle deposit" : kind === "deposit_return" ? "deposit return" : "");
+    const row = {name: String(it.name||product).trim(), product, category: kind === "product" ? catOf(it.category) : "other", qty, unit: it.unit||"pcs", unitPrice: r2(price/qty), price};
+    if (kind !== "product") row.kind = kind;                     // stored only when it isn't a product
+    else { const d = r2(Math.abs(num(it.discount))); if (d >= 0.01) row.discount = d; if (it.gift) row.gift = true; }   // stored only when used, so older receipts need no change
     return row; })
     .filter(it => it.product || it.price);
   if (!items.length){ toast("Add at least one line with a price."); return; }
@@ -1186,8 +1266,14 @@ async function runScan(file){
       const name = String(it.name||"").trim(); let product = key(it.product || name); let category = catOf(it.category);
       const a = S.aliases[key(name)]; if (a){ product = a.product; category = a.category; }
       const qty = num(it.qty)||1, price = r2(num(it.price)); const unit = ["pcs","kg","l"].includes(it.unit)?it.unit:"pcs";
-      return {name, product, category, qty, unit, unitPrice: r2(num(it.unitPrice) || price/qty), price};
+      const kind = ["deposit","deposit_return"].includes(it.kind) ? it.kind : "product";
+      if (kind !== "product") return {name, product: kind === "deposit" ? "bottle deposit" : "deposit return", category:"other", kind, qty, unit:"pcs",
+        unitPrice: r2((kind === "deposit_return" ? -Math.abs(price) : Math.abs(price))/qty), price: kind === "deposit_return" ? -Math.abs(price) : Math.abs(price)};
+      const row = {name, product, category, qty, unit, unitPrice: r2(price/qty), price};
+      const d = r2(Math.abs(num(it.discount))); if (d >= 0.01) row.discount = d;
+      return row;
     });
+    spreadReceiptDiscount(items, r2(sum((res.receiptDiscounts || []).map(x => Math.abs(num(x.amount))))));
     const date = /^\d{4}-\d{2}-\d{2}$/.test(res.date||"") ? res.date : todayISO();
     startEditor({imageUrl:url, source:"scan", store:String(res.store||"").trim(), date, printedTotal: num(res.total)||null, items, original: items.map(i=>({...i}))});
   } catch(e){
@@ -1216,9 +1302,9 @@ async function runScan(file){
 /* ---------- export & account ---------- */
 function exportCsv(){
   const q = v => { const s = String(v ?? ""); return /[",\n;]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; };
-  const rows = [["date","store","source","product","name_on_receipt","category","qty","unit","unit_price","price","currency"]];
+  const rows = [["date","store","source","kind","product","name_on_receipt","category","qty","unit","unit_price","price","discount","gift","currency"]];
   [...S.real].sort(byDate).forEach(r => (r.items||[]).forEach(it =>
-    rows.push([r.date, r.store, r.source, it.product, it.name, CAT[it.category]||"Other", it.qty, it.unit, it.unitPrice, it.price, S.currency])));
+    rows.push([r.date, r.store, r.source, kindOf(it), it.product, it.name, CAT[it.category]||"Other", it.qty, it.unit, it.unitPrice, it.price, discOf(it) || "", it.gift ? "yes" : "", S.currency])));
   if (rows.length === 1){ toast("Nothing to export yet."); return; }
   const blob = new Blob(["﻿" + rows.map(r=>r.map(q).join(",")).join("\n")], {type:"text/csv;charset=utf-8"});
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `mijnparagon-${todayISO()}.csv`;

@@ -22,14 +22,19 @@ const CATEGORIES = [
 const PROMPT = `The image is a photo of a shopping receipt (any country or language). Extract its contents.
 Reply with only JSON in exactly this shape, no other text:
 {"store": string, "date": "YYYY-MM-DD" or null, "total": number or null,
- "items": [{"name": string, "product": string, "category": string, "qty": number, "unit": "pcs"|"kg"|"l", "unitPrice": number, "price": number}]}
+ "items": [{"name": string, "product": string, "category": string, "kind": "product"|"deposit"|"deposit_return", "qty": number, "unit": "pcs"|"kg"|"l", "unitPrice": number, "price": number, "discount": number}],
+ "receiptDiscounts": [{"name": string, "amount": number}]}
 Rules:
 - "name": the line text as printed.
 - "product": a short generic product name in English, lowercase, without brand, size or pack count, so the same item can be matched across shops (e.g. "milk", "gouda cheese", "bread rolls", "toothpaste", "sparkling water").
 - "category": one of ${CATEGORIES.join(", ")}.
-- "price": the final amount paid for that line. Fold discount / Rabatt / rabat / promotion lines into the item they belong to. Bottle deposit (Pfand, kaucja) is its own item with product "bottle deposit", category "other".
+- "price": the final amount paid for that line, after any discount on it.
+- "discount": how much an offer saved on that line, as a positive number (0 when none). Discount / Rabatt / rabat / korting / Bonus / promotion / "2 for 1" lines are never items of their own: add their amount to the "discount" of the product they belong to (usually the line just above) and lower that product's "price" by it.
+- "receiptDiscounts": discounts on the whole receipt that don't belong to one product (a coupon, % off the total, loyalty points redeemed as money), each with a positive "amount". Use [] when there are none.
+- Loyalty and bonus cards are never products. Lines that only show or register a card (e.g. Bonuskaart, AH Bonus, Payback, Lidl Plus, Clubcard, Moja Biedronka, DeutschlandCard, a card or member number, "card scanned"), points earned and points balances are not items: leave them out. If such a line carries a money amount off (e.g. "Bonus -0,50", "Lidl Plus Rabatt -1,00"), treat it as a discount by the rule above, never as an item.
+- "kind": "product" for everything bought. A bottle deposit paid (Pfand, statiegeld, kaucja) is its own item with kind "deposit", product "bottle deposit", category "other". A deposit refund or empties return (Leergut, emballage, statiegeld retour, zwrot kaucji) is its own item with kind "deposit_return", product "deposit return", category "other", and a negative "price". Deposits are not discounts.
 - "qty" x "unitPrice" = "price" (approximately). Weighed goods use unit "kg".
-- Skip VAT/PTU/MwSt summaries, subtotals, payment method, change and card slips.
+- Skip VAT/PTU/MwSt/BTW summaries, subtotals, payment method, change and card payment slips.
 - "total": the grand total printed on the receipt. Numbers use a dot as decimal separator, no currency symbols.
 - If the image is not a receipt, reply {"error": "not a receipt"}.`;
 

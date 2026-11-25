@@ -22,7 +22,8 @@ const S = {
   view: "home", month: null, openCat: null, q: "", withFixed: false, rules: [],
   real: [], loaded: false, currency: "EUR", aliases: {},
   user: null, draft: null, scanCtl: null, used: null, limit: null,
-  openNotes: new Set()   // fold-out notes the person opened, kept open when the page redraws
+  openNotes: new Set(),  // fold-out notes the person opened, kept open when the page redraws
+  cards: {current:null, since:null, unlocked:{}, readings:[], unseen:null}, demoCards: null, dealCard: null
 };
  
 /* ---------- helpers ---------- */
@@ -427,24 +428,395 @@ function paceSection(A, list, mk){
     ${paceChart(mk, cur, avg, today)}
     <details class="more chart-note" data-note="pace"${S.openNotes.has("pace")?" open":""}><summary class="small muted">How this is worked out</summary><p class="small muted">Pace shows how this month builds up day by day. Month by month, below, shows whether it's part of a longer trend.</p><p class="small muted">${note}</p></details></div>`;
 }
-/* ---------- spending type: progress towards revealing your card ---------- */
-const TYPE_GOAL = 20;
-// Counts your own scanned or hand-entered expenses. Monthly repeats (rent etc.) say nothing about how you shop, so they don't count.
-const typeProgressCount = () => S.real.filter(r => !r.recurringId).length;
-const CARD_BACK = `<svg class="card-back" viewBox="0 0 70 98" aria-hidden="true"><rect x="1" y="1" width="68" height="96" rx="9" fill="var(--mint)" stroke="var(--ink)" stroke-width="1.5"/>
-  <g fill="none" stroke="var(--ink)" stroke-width="6" stroke-linecap="round"><path d="M-4 20 C 10 4, 24 2, 30 -6"/><path d="M48 -4 C 52 8, 66 10, 76 6"/><path d="M-6 78 C 8 74, 14 90, 10 104"/><path d="M58 104 C 56 90, 66 84, 78 86"/></g>
-  <text x="35" y="58" text-anchor="middle" font-size="30" font-weight="700" fill="var(--ink)" font-family="var(--display)">?</text></svg>`;
-function typeProgressSection(){
-  const n = Math.min(TYPE_GOAL, typeProgressCount()), done = n >= TYPE_GOAL;
-  const pips = Array.from({length: TYPE_GOAL}, (_, i) => `<i class="${i < n ? "on" : ""}"></i>`).join("");
-  return `<div class="type-progress card" role="group" aria-label="Spending type progress">
-    ${CARD_BACK}
+/* ---------- spending type ----------
+   Three questions about how you shop, each scored 0–100 from your own receipts:
+     Price   T Thrifty  / C Carefree  : offers you use, how much you pay above your own best price, deposits you return
+     Rhythm  D Drop-in  / B Big shop  : how often you shop, and how much goes on small top-up days
+     Novelty R Ritual   / E Explorer  : how much goes on products you buy again, and how loyal you are to one shop
+   A score of 50 or more gives the first letter. The code is read price · rhythm · novelty, e.g. TBR.
+   Every number the rules use lives in TYPE_CFG, so calibrating means changing only this object. */
+const TYPE_CFG = {
+  minExpenses: 20,       // qualifying expenses needed before a type can be read
+  minDays: 10,           // days from your first qualifying expense to today
+  minShopDays: 4,        // different days you went shopping
+  windowDays: 60,        // later readings look at the last 60 days (the first one uses everything)
+  confirm: 2,            // a new type must come out of this many readings in a row before its card is given
+  near: [40, 60],        // a score in this band means "with a bit of" the other letter
+  thrift: { offers:[0, .10], premium:[.04, 0], deposits:[0, 1], weights:{offers:.4, premium:.4, deposits:.2}, minComparable:3, minDeposit:1 },
+  dropin: { freq:[.15, .45], small:[0, 1], smallDay:.25, weights:{freq:.5, small:.5} },
+  ritual: { repeat:[.20, .70], loyal:[.30, .80], weights:{repeat:.6, loyal:.4} },
+};
+const TYPE_GOAL = TYPE_CFG.minExpenses;
+const AXES = [
+  {k:"thrift", hi:"T", lo:"C", hiName:"Thrifty",  loName:"Carefree", q:"Price"},
+  {k:"dropin", hi:"D", lo:"B", hiName:"Drop-in",  loName:"Big shop", q:"Rhythm"},
+  {k:"ritual", hi:"R", lo:"E", hiName:"Ritual",   loName:"Explorer", q:"Novelty"},
+];
+const scale = (x, [a, b]) => Math.max(0, Math.min(100, (x - a) / (b - a) * 100));
+const isoDaysAgo = n => { const d = new Date(); d.setDate(d.getDate() - n); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
+const dayDiff = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 864e5);
+const shopLines = r => lines(r).filter(it => !NOT_PRODUCTS.includes(catOf(it.category)));
+// Counts for your type: an expense with at least one product, scanned or added by hand. Monthly repeats and
+// services (rent, transport, eating out…) say little about how you shop.
+const qualifies = r => !r.recurringId && shopLines(r).length > 0;
+
+function typeReading(list, since){
+  const C = TYPE_CFG, today = todayISO();
+  const inWin = r => r.date && r.date <= today && (!since || r.date >= since);
+  const Q = list.filter(r => inWin(r) && qualifies(r));
+  if (!Q.length) return {n:0, days:0, shopDays:0, ready:false};
+  const first = Q.reduce((m, r) => r.date < m ? r.date : m, Q[0].date);
+  const span = dayDiff(first, today) + 1;
+  const day = {}, shops = {}, prods = {}, groups = {};
+  let paid = 0, saved = 0;
+  for (const r of Q) for (const it of shopLines(r)){
+    const p = num(it.price), d = discOf(it), qty = num(it.qty) || 1;
+    paid += p; saved += d;
+    day[r.date] = (day[r.date] || 0) + p;
+    if (r.store){ const X = shops[key(r.store)] ||= {name:r.store, e:0}; X.e += p; }
+    const pk = key(it.product || it.name); if (!pk) continue;
+    const P = prods[pk] ||= {days:new Set(), e:0}; P.days.add(r.date); P.e += p;
+    (groups[`${pk}|${mkOf(r.date)}|${it.unit || "pcs"}`] ||= {pk, buys:[]}).buys.push({up:(p + d)/qty, qty});
+  }
+  // price premium: same product, same month, against the lowest regular price you paid
+  let prem = 0, compReg = 0; const comparable = new Set();
+  for (const G of Object.values(groups)){
+    if (G.buys.length < 2) continue;
+    const lo = Math.min(...G.buys.map(b => b.up)); comparable.add(G.pk);
+    for (const b of G.buys){ prem += (b.up - lo) * b.qty; compReg += b.up * b.qty; }
+  }
+  let depPaid = 0, depBack = 0;
+  for (const r of list) if (inWin(r)) for (const it of r.items || []){ const k = kindOf(it);
+    if (k === "deposit") depPaid += num(it.price); else if (k === "deposit_return") depBack += Math.abs(num(it.price)); }
+
+  const T = C.thrift, sig = [];
+  const o = paid + saved ? saved / (paid + saved) : 0;
+  sig.push([scale(o, T.offers), T.weights.offers]);
+  const p = compReg ? prem / compReg : null;
+  if (comparable.size >= T.minComparable) sig.push([scale(p, T.premium), T.weights.premium]);
+  const dep = depPaid >= T.minDeposit ? Math.min(1, depBack / depPaid) : null;
+  if (dep !== null) sig.push([scale(dep, T.deposits), T.weights.deposits]);
+  const thrift = sum(sig.map(([s, w]) => s*w)) / sum(sig.map(([, w]) => w));
+
+  const bs = Object.values(day), tot = sum(bs), shopDays = bs.length;
+  const f = shopDays / span, week = tot / (span / 7);
+  const c = tot ? sum(bs.filter(b => b < C.dropin.smallDay * week)) / tot : 0;
+  const dropin = C.dropin.weights.freq * scale(f, C.dropin.freq) + C.dropin.weights.small * scale(c, C.dropin.small);
+
+  const rep = tot ? sum(Object.values(prods).filter(P => P.days.size >= 2).map(P => P.e)) / tot : 0;
+  const sh = Object.values(shops).sort((a, b) => b.e - a.e), shTot = sum(sh.map(s => s.e));
+  const loyal = shTot ? sh[0].e / shTot : 0;
+  const ritual = C.ritual.weights.repeat * scale(rep, C.ritual.repeat) + C.ritual.weights.loyal * scale(loyal, C.ritual.loyal);
+
+  const scores = {thrift, dropin, ritual};
+  const code = AXES.map(a => scores[a.k] >= 50 ? a.hi : a.lo).join("");
+  // "with a bit of": the score closest to 50, if it lies in the band
+  let bit = null, best = 99;
+  AXES.forEach((a, i) => { const s = scores[a.k], d = Math.abs(s - 50);
+    if (s >= C.near[0] && s <= C.near[1] && d < best){ best = d; bit = code.slice(0, i) + (code[i] === a.hi ? a.lo : a.hi) + code.slice(i + 1); } });
+  return {n:Q.length, days:span, shopDays, code, bit, scores,
+    ready: Q.length >= C.minExpenses && span >= C.minDays && shopDays >= C.minShopDays,
+    detail:{offers:o, premium:p, deposits:dep, freq:f, small:c, repeat:rep, loyal, topShop:sh[0]?.name || ""}};
+}
+
+/* ---------- the eight types (texts by MijnParagon) ---------- */
+const TYPES = {
+  TBR: {slug:"domowik", name:"Domowik", quote:"A penny saved is a penny earned.",
+    legend:"In Slavic homes, the Domowik lived behind the stove. This small, bearded guardian kept the household in order and the pantry full, and families left him bread and salt in thanks. He was kind to tidy, careful homes and grumpy with wasteful ones.",
+    how:"You don’t pop out for milk: you plan one big shop, fill the cupboards and know exactly what’s in them. Your basket barely changes from week to week, and you know what each staple should cost.",
+    sup:["the well-stocked pantry", "Planning ahead means fewer trips, fewer temptations and better prices per kilo. Your price premium stays low."],
+    blind:["the back of the cupboard", "Big shops can mean food that expires before you get to it. A full pantry only saves money if everything in it gets used."],
+    dyk:"Studies of grocery shopping suggest that people who shop with a list tend to make fewer unplanned purchases, which is your natural habitat.",
+    opp:"CDE", kin:"TDR"},
+  TBE: {slug:"pooka", name:"Pooka", quote:"To each his own.",
+    legend:"The Púca of Irish folklore is a shapeshifter: a dark horse one night, a goat or a hare the next. Pull it close and it takes you on a wild ride across the countryside, and you never quite know where you’ll end up, but it’s always a story worth telling.",
+    how:"Your big shops are adventures. You hunt for good prices, but your cart is full of new finds: a cheese you’ve never tried, a sauce on special, a different brand of coffee each time.",
+    sup:["the bargain explorer", "You combine curiosity with a sharp eye. You try new things without paying the price of novelty, often because you find them on offer."],
+    blind:["“too good to leave”", "A good deal on something new is tempting, even when you didn’t need it. If it ends up unused, it was never a bargain."],
+    dyk:"Researchers have a name for the glow you feel after a good deal: the “smart shopper feeling”. For some people it’s as rewarding as the product itself.",
+    opp:"CDR", kin:"TDE"},
+  TDR: {slug:"baku", name:"Baku", quote:"Waste not, want not.",
+    legend:"In Japanese folklore, the Baku is a gentle creature stitched together from many animals: an elephant’s trunk, a tiger’s paws, an ox’s tail. It feeds on bad dreams. People used to keep its picture by their pillow and, waking from a nightmare, whisper: “Baku, eat my dream.” By morning, the bad dream was gone, and nothing was wasted.",
+    how:"You shop little and often: a quick stop on the way home rather than one big weekly haul. Your basket is familiar: you know what you like, and you know what it should cost. When something is overpriced, you notice. Like the Baku, you quietly clear away what isn’t worth keeping.",
+    sup:["price memory", "You know the normal price of your staples better than almost anyone. Because you buy the same products again and again, every price change stands out to you, and you rarely pay more than you need to."],
+    blind:["the little extras", "Every trip to a shop is a small temptation. Research on in-store behaviour suggests that a large share of what people buy is unplanned, and each extra visit is another chance for a chocolate bar or a coffee to slip into the basket. One extra item per trip doesn’t feel like much, but it adds up over a month."],
+    dyk:"Shopping researchers distinguish between “stock-up” trips and quick “fill-in” trips. Fill-in shoppers tend to waste less food, because they buy what they need right now, but they also spend more time shopping in total.",
+    opp:"CBE", kin:"TBR",
+    oppTxt:"Rare, big, adventurous hauls where price is not the main thing. Where you clear away waste, Zar-ptak fills the cart with discoveries.",
+    kinTxt:"Just as careful with money and just as loyal to favourites, but prefers one big planned trip to many small ones."},
+  TDE: {slug:"chupacabra", name:"Chupacabra", quote:"Fond of the sound of a strange bell.",
+    legend:"First reported in Puerto Rico in the 1990s, the Chupacabra became a legend across the Americas: a mysterious creature that appears out of nowhere, strikes quickly and vanishes before anyone gets a good look.",
+    how:"Quick, frequent raids. You pop into whichever shop is closest, scan the offers and leave with something cheap and new. Your receipts are short, varied and spread across many shops.",
+    sup:["the quick find", "You spot deals and novelties others walk past. Your price premium stays low because you buy whatever is good value that day."],
+    blind:["many small raids", "Every visit costs a little: time, and the occasional extra you didn’t plan. Many tiny baskets can add up to more than one planned one."],
+    dyk:"Psychologists think some people simply need more novelty than others to feel good. They call it the “optimal stimulation level”. Trying new things is how you keep life interesting.",
+    opp:"CBR", kin:"TBE"},
+  CBR: {slug:"selkie", name:"Selkie", quote:"The world is your oyster.",
+    legend:"In the tales of Scotland, Ireland and the Faroe Islands, selkies are seals that shed their skins to walk on land as people. However long they stay, they always long to return to the sea, to the place that feels like home.",
+    how:"One big, comfortable shop at your favourite place, with your favourite products. You don’t compare prices across town: you value knowing the aisles, the brands and the routine.",
+    sup:["effortless shopping", "No endless comparing, no decision fatigue. Your shopping takes little time and little energy, and that’s worth something too."],
+    blind:["the comfort premium", "Loyalty to one shop and familiar brands means you sometimes pay more for the same thing. Not a problem in itself, as long as it’s a choice."],
+    dyk:"In a famous study, shoppers offered 24 kinds of jam were less likely to buy than those offered 6. Later research is mixed, but many people know the feeling: fewer choices can mean an easier life.",
+    opp:"TDE", kin:"CDR"},
+  CBE: {slug:"zar-ptak", name:"Zar-ptak", quote:"No generous person ever went to hell.",
+    legend:"In Slavic fairy tales, the Zar-ptak’s feathers glow so brightly that a single one lights up a whole room. Princes leave their homes on long journeys just to catch a glimpse of it, and come back with treasures they never expected.",
+    how:"Shopping is an outing. You do it less often, but in style: a big basket, new flavours, something special for the weekend. Price matters less than the experience.",
+    sup:["making it count", "You enjoy what you buy, and you bring home discoveries others never try. Your table is rarely boring."],
+    blind:["the overflowing cart", "Big, exciting shops can mean more than you can use, and new products often cost more than the familiar ones."],
+    dyk:"When people plan several purchases at once, they tend to choose more variety than they later actually want. Researchers call it the diversification bias.",
+    opp:"TDR", kin:"TBE"},
+  CDR: {slug:"kitsune", name:"Kitsune", quote:"Spend and God will send.",
+    legend:"In Japan, kitsune are fox spirits and messengers of Inari, the deity of rice. They grow a new tail with each century of wisdom, up to nine, and are known for their loyalty to the places and people they choose.",
+    how:"The same route, the same shop, almost every day. You know the staff, the shelves and what you’ll buy before you walk in. Shopping fits seamlessly into your day.",
+    sup:["rhythm", "You rarely forget anything and rarely buy too much, because you shop for today. Fresh bread, fresh fruit, no overflowing fridge."],
+    blind:["the convenience premium", "The shop closest to your route is not always the cheapest, and daily visits make small differences add up."],
+    dyk:"Habit researchers estimate that a large part of what we do every day we do on autopilot, in the same places at the same times. Your shopping is a habit that works for you.",
+    opp:"TBE", kin:"CBR"},
+  CDE: {slug:"anansi", name:"Anansi", quote:"Joie de vivre.",
+    legend:"Anansi the spider is a hero of Akan folktales from Ghana, later told across the Caribbean. Clever and endlessly curious, he once won all the world’s stories from the sky god Nyame, and has been spreading them ever since.",
+    how:"Often, spontaneously, and always with an eye for something new. You go wherever life takes you that day, and every receipt tells a slightly different story.",
+    sup:["curiosity", "You discover new products, new shops and new flavours before anyone else. Your shopping is never dull."],
+    blind:["small, painless payments", "Many small, spontaneous purchases don’t feel like much one by one, especially when you just tap a card. Together, they can become a big part of the month."],
+    dyk:"Studies suggest that people are willing to pay more when paying by card than with cash. Paying feels less painful when you don’t see the money leave your hand.",
+    opp:"TBR", kin:"CBE"},
+};
+const TYPE_ORDER = ["TBR","TBE","TDR","TDE","CBR","CBE","CDR","CDE"];
+const dotCode = c => c.split("").join("·");
+
+/* Your own numbers for the back of the card, from the last 30 days (the lever looks at your last months). */
+function typeFacts(list, A){
+  const today = todayISO(), since = isoDaysAgo(29);
+  const Q = list.filter(r => r.date >= since && r.date <= today && qualifies(r));
+  const tot = r => sum(shopLines(r).map(it => num(it.price)));
+  const spend = sum(Q.map(tot));
+  const st = {}; Q.forEach(r => { if (r.store){ const X = st[key(r.store)] ||= {name:r.store, e:0}; X.e += tot(r); } });
+  const shops = Object.values(st).sort((a, b) => b.e - a.e);
+  // new products only mean something once you've tracked for a while before these 30 days
+  const firstEver = list.filter(qualifies).reduce((m, r) => !m || r.date < m ? r.date : m, "");
+  const canNew = firstEver && firstEver <= isoDaysAgo(59);
+  const newKeys = new Set(Object.values(A.products).filter(P => !NOT_PRODUCTS.includes(P.category) && P.buys[0].date >= since).map(P => P.key));
+  let newSpend = 0; Q.forEach(r => shopLines(r).forEach(it => { if (newKeys.has(key(it.product || it.name))) newSpend += num(it.price); }));
+  const smallR = Q.filter(r => tot(r) < 5);
+  const prodSpend = {}; Q.forEach(r => shopLines(r).forEach(it => { const k = key(it.product || it.name); if (k) prodSpend[k] = (prodSpend[k] || 0) + num(it.price); }));
+  const top5 = Object.values(prodSpend).sort((a, b) => b - a).slice(0, 5);
+  const lastMk = [...A.mks].reverse().find(m => A.months[m]?.count);
+  return {visits:Q.length, basket: Q.length ? spend/Q.length : 0, spend, shops:shops.length, top:shops[0], topShare: spend && shops[0] ? shops[0].e/spend : 0,
+    canNew, newN:newKeys.size, newShare: spend ? newSpend/spend : 0, distinct:Object.keys(prodSpend).length,
+    smallN:smallR.length, smallSum:sum(smallR.map(tot)), top5Share: spend ? sum(top5)/spend : 0, top5N: top5.length,
+    premium: lastMk ? A.months[lastMk].premium : 0, premMk: lastMk};
+}
+const P0 = v => `${Math.round(v*100)}%`;
+function typeDataLine(code, F, R){
+  if (!F.visits) return "";
+  const trips = `${F.visits} shopping trip${plural(F.visits)}`;
+  const newTxt = F.canNew ? `you tried <b>${F.newN}</b> new product${plural(F.newN)}` : `you bought <b>${F.distinct}</b> different products`;
+  const L = {
+    TBR: `Last 30 days: <b>${trips}</b>, average basket <b>${money(F.basket)}</b>.`,
+    TBE: `In the last 30 days ${newTxt}.`,
+    TDR: `Your price premium in ${F.premMk ? mkLabel(F.premMk, true) : "your last month"}: <b>${money(F.premium)}</b>. In the last 30 days you went shopping <b>${F.visits}</b> time${plural(F.visits)}, with an average basket of <b>${money(F.basket)}</b>.`,
+    TDE: `Last 30 days: <b>${trips}</b> across <b>${F.shops}</b> different shop${plural(F.shops)}.`,
+    CBR: `Last 30 days: <b>${trips}</b>.${R?.detail ? ` <b>${P0(R.detail.repeat)}</b> of your spending goes on favourites you buy again and again.` : ""}`,
+    CBE: `In the last 30 days ${newTxt}.`,
+    CDR: F.top ? `Last 30 days: <b>${trips}</b>, <b>${P0(F.topShare)}</b> of your spending at <b>${esc(F.top.name)}</b>.` : `Last 30 days: <b>${trips}</b>.`,
+    CDE: `Last 30 days: <b>${trips}</b>, ${newTxt}.`,
+  };
+  return L[code] || "";
+}
+function typeLever(code, F, A, list){
+  const sv = () => shopSavings(A).rows, perM = y => money(y/12, 0);
+  const switchOne = () => { const x = sv()[0]; return x && `<b style="text-transform:capitalize">${esc(x.P.label)}</b> costs you <b>${money(x.yours)}</b> per ${esc(x.P.unit)} on average, while at <b>${esc(x.shop)}</b> you paid <b>${money(x.price)}</b>. Buying it there would save about <b>${perM(x.year)}</b> a month.`; };
+  const shopGap = () => { const {rows} = shopIndex(A, list); if (rows.length < 2) return null;
+    const main = rows[0], cheap = [...rows].sort((x, y) => x.idx - y.idx)[0]; if (main === cheap) return null;
+    const gap = 1 - (1 + cheap.idx) / (1 + main.idx); return gap >= .03 ? {main, cheap, gap} : null; };
+  let t = null;
+  if (code === "TBR") t = switchOne() && `${switchOne()} Stocking up where it’s cheapest adds up.`;
+  else if (code === "TDR") t = switchOne() && `${switchOne()} It doesn’t change your routine, only where you pick it up.`;
+  else if (code === "CBR"){ const rs = sv().slice(0, 3); if (rs.length) t = `${switchOne()}${rs.length > 1 ? ` Switching just your top ${rs.length} products would save about <b>${perM(sum(rs.map(x => x.year)))}</b> a month, without changing your routine.` : ""}`; }
+  else if (code === "TDE" || code === "CDR"){ const g = shopGap(), {rows} = shopIndex(A, list);
+    if (!g && rows.length >= 2) t = `Good news: <b>${esc(rows[0].name)}</b>, where you shop most, is already one of your cheapest shops for the same products. Keep an eye on the little extras that daily visits invite.`;
+    if (g) t = (code === "TDE" ? `You’ve shopped at <b>${F.shops}</b> place${plural(F.shops)} in the last 30 days. ` : "")
+      + `At <b>${esc(g.cheap.name)}</b> the same products cost you on average <b>${P0(g.gap)}</b> less than at <b>${esc(g.main.name)}</b>. ${code === "TDE" ? "Making it your first stop" : "Doing one of your visits there each week"} would cut what you pay.`; }
+  else if (code === "TBE"){ if (F.top5N >= 5) t = `Your <b>5</b> most-bought products are <b>${P0(F.top5Share)}</b> of your spending. Knowing your lowest price for these few saves more than chasing every new offer.`; }
+  else if (code === "CBE"){ if (F.canNew && F.newShare > 0) t = `New products made up <b>${P0(F.newShare)}</b> of your spending in the last 30 days. Keeping the ones you loved and dropping the rest saves money without losing the fun.`; }
+  else if (code === "CDE"){ if (F.smallN) t = `Your <b>${F.smallN}</b> small purchase${plural(F.smallN)} under ${money(5, 0)} added up to <b>${money(F.smallSum)}</b> in the last 30 days. Knowing that number is often enough to make the next one a conscious choice.`; }
+  return t || `Keep adding receipts: once there’s enough to compare, your own numbers show up here.`;
+}
+
+/* ---------- your collection: which cards you have, kept with your account ----------
+   cards = {current, since, unlocked:{CODE:date}, readings:[{mk, at, code, scores}], unseen}
+   The first card is revealed when you tap it. After that, once a month, your last 60 days are read again;
+   a new type only takes over when it comes out of TYPE_CFG.confirm readings in a row. */
+const emptyCards = () => ({current:null, since:null, unlocked:{}, readings:[], unseen:null});
+const normCards = c => ({...emptyCards(), ...(c && typeof c === "object" ? c : {}), unlocked:{...(c?.unlocked || {})}, readings:[...(c?.readings || [])]});
+const LS_CARDS = "paragon.cards.v1.";
+const cardsNow = () => isDemo() ? (S.demoCards ||= emptyCards()) : S.cards;
+const roundScores = s => Object.fromEntries(Object.entries(s).map(([k, v]) => [k, Math.round(v)]));
+async function saveCards(){
+  if (isDemo() || !sb || !S.user) return;
+  const {error} = await sb.from("profiles").upsert({user_id:S.user.id, cards:S.cards, updated_at:new Date().toISOString()});
+  if (error){ // the cards column isn't there yet (005_cards.sql not run): keep them on this device meanwhile
+    console.warn("cards saved on this device only:", error.message);
+    try { localStorage.setItem(LS_CARDS + S.user.id, JSON.stringify(S.cards)); } catch(_){}
+  }
+}
+function loadCards(profile){
+  let c = profile?.cards;
+  if (!c?.current){ try { c = JSON.parse(localStorage.getItem(LS_CARDS + S.user.id) || "null") || c; } catch(_){} }
+  S.cards = normCards(c);
+}
+// once a month, after the first card: read the last 60 days again
+async function monthlyTypeReading(){
+  const C = S.cards; if (!C.current) return;
+  const mk = mkOf(todayISO()), last = C.readings[C.readings.length - 1];
+  if (last && last.mk >= mk) return;
+  const R = typeReading(S.real, isoDaysAgo(TYPE_CFG.windowDays - 1));
+  if (!R.ready) return;
+  C.readings = [...C.readings, {mk, at:todayISO(), code:R.code, scores:roundScores(R.scores)}].slice(-24);
+  const lastN = C.readings.slice(-TYPE_CFG.confirm);
+  if (R.code !== C.current && lastN.length === TYPE_CFG.confirm && lastN.every(x => x.code === R.code)){
+    C.current = R.code; C.since = todayISO();
+    if (!C.unlocked[R.code]){ C.unlocked[R.code] = todayISO(); C.unseen = R.code; }
+  }
+  await saveCards();
+}
+// The reading shown on your card: the latest one that gave your current type (or a fresh one in the example)
+function shownReading(list){
+  const C = cardsNow();
+  const saved = [...C.readings].reverse().find(x => x.code === C.current);
+  const R = typeReading(list, C.readings.length > 1 ? isoDaysAgo(TYPE_CFG.windowDays - 1) : null);
+  if (saved && R.code !== saved.code) return {...R, code:saved.code, scores:saved.scores, bit:null};
+  return R;
+}
+
+/* ---------- the card itself ---------- */
+const typeArt = T => `<span class="tc-ph" aria-hidden="true">${esc(T.name[0])}</span><img class="tc-art" src="icons/types/${T.slug}.png" alt="" loading="lazy">`;
+function cardFront(code, cls = ""){
+  const T = TYPES[code];
+  return `<span class="tcard tc-front-face ${cls}"><img class="tc-frame" src="icons/cards/front.webp" alt="">
+    <span class="tc-in"><span class="tc-name">${esc(T.name)}</span>
+      <span class="tc-chips">${code.split("").map(l => `<i>${l}</i>`).join("")}</span>
+      <span class="tc-pic">${typeArt(T)}</span>
+      <span class="tc-quote">“${esc(T.quote)}”</span></span></span>`;
+}
+const cardDown = (cls = "") => `<span class="tcard tc-down ${cls}"><img class="tc-frame" src="icons/cards/back.webp" alt=""><span class="tc-q" aria-hidden="true">?</span></span>`;
+function whyBars(R){
+  if (!R?.scores) return "";
+  return `<div class="why"><h4>Why this type</h4>${AXES.map(a => { const s = Math.round(R.scores[a.k]);
+    return `<div class="why-row"><span class="${s >= 50 ? "on" : ""}">${a.hiName}</span><span class="why-bar" role="img" aria-label="${a.q}: ${s} of 100 towards ${a.hiName}"><i style="left:${s}%"></i></span><span class="${s < 50 ? "on" : ""}">${a.loName}</span></div>`; }).join("")}</div>`;
+}
+function cardBack(code, list, A, R){
+  const C = cardsNow(), T = TYPES[code], F = typeFacts(list, A), mine = code === (C.pending?.code || C.current);
+  const data = mine ? typeDataLine(code, F, R) : "";
+  const rel = (c, txt, label) => `<b>${label}:</b> ${esc(TYPES[c].name)} (${dotCode(c)})${txt ? `. ${esc(txt)}` : ""}`;
+  return `<div class="tcard tc-back-face"><img class="tc-frame" src="icons/cards/back.webp" alt="">
+    <div class="tc-text">
+      <h3>${esc(T.name)} <span>(${dotCode(code)})</span></h3>
+      <p class="tc-quote-b">“${esc(T.quote)}”</p>
+      ${mine ? whyBars(R) : ""}
+      <h4>The legend</h4><p>${esc(T.legend)}</p>
+      <h4>How you shop</h4><p>${esc(T.how)}</p>
+      <h4>Your superpower: ${esc(T.sup[0])}</h4><p>${esc(T.sup[1])}</p>${data ? `<p class="tc-data">${data}</p>` : ""}
+      <h4>Your blind spot: ${esc(T.blind[0])}</h4><p>${esc(T.blind[1])}</p>
+      ${mine ? `<h4>Your lever</h4><p>${typeLever(code, F, A, list)}</p>` : ""}
+      <h4>Did you know?</h4><p>${esc(T.dyk)}</p>
+      <p class="tc-rel">${rel(T.opp, T.oppTxt, "Your opposite")}<br>${rel(T.kin, T.kinTxt, "Your kindred spirit")}</p>
+    </div></div>`;
+}
+// One card you can turn over. reveal: starts face down and turns itself over, the first time you get it.
+function openTypeCard(code, {reveal = false} = {}){
+  const list = receipts(), A = analyze(list), R = shownReading(list);
+  $("#sheetRoot").innerHTML = `<div class="tc-stage${reveal ? " revealing" : ""}" role="dialog" aria-modal="true" aria-label="${esc(TYPES[code].name)} card">
+    <button class="icon-btn tc-close" data-action="tcclose" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    ${reveal ? `<p class="tc-title">Your spending type is…</p>` : ""}
+    <div class="tc-flip${reveal ? " down" : ""}" data-action="tcflip" role="button" tabindex="0" aria-label="Turn the card over">
+      <div class="tc-face front">${cardFront(code)}</div>
+      <div class="tc-face back">${reveal ? cardDown() : ""}${cardBack(code, list, A, R)}</div>
+    </div>
+    <p class="tc-hint small">${reveal ? "&nbsp;" : "Tap the card to turn it over"}</p>
+    ${reveal ? `<button class="btn tc-done" data-action="tcdone" hidden>Add to my collection</button>` : ""}
+  </div>`;
+  document.body.style.overflow = "hidden";
+  const stage = $(".tc-stage"), flip = $(".tc-flip");
+  if (!reveal){ flip.focus(); return; }
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  setTimeout(() => {
+    flip.classList.remove("down"); stage.classList.add("shown");
+    setTimeout(() => {
+      stage.classList.remove("revealing"); stage.querySelector(".tc-down")?.remove();
+      const T = TYPES[code];
+      $(".tc-title").innerHTML = `Your spending type is <b>${esc(T.name)}</b> (${dotCode(code)})!${R.bit && R.bit !== code ? `<span class="small"> With a bit of ${esc(TYPES[R.bit].name)}.</span>` : ""}`;
+      $(".tc-hint").textContent = "Tap the card to turn it over and read about your type";
+      const d = $(".tc-done"); d.hidden = false; d.focus();
+    }, still ? 0 : 900);
+  }, still ? 0 : 700);
+}
+function closeTypeCard(){ $("#sheetRoot").innerHTML = ""; document.body.style.overflow = ""; }
+async function revealType(){
+  const list = receipts(), C = cardsNow();
+  if (C.unseen){ const code = C.unseen; openTypeCard(code, {reveal:true}); return; }
+  const R = typeReading(list, null);
+  if (!R.ready) return;
+  C.pending = R; openTypeCard(R.code, {reveal:true});
+}
+async function finishReveal(){
+  const C = cardsNow(), today = todayISO();
+  if (C.unseen){ C.unseen = null; }
+  else if (C.pending){ const R = C.pending; delete C.pending;
+    C.current = R.code; C.since = today; C.unlocked[R.code] ||= today;
+    C.readings = [...C.readings, {mk:mkOf(today), at:today, code:R.code, scores:roundScores(R.scores)}]; }
+  S.dealCard = C.current;
+  closeTypeCard(); render();
+  saveCards().catch(() => {});
+  document.getElementById("sec-type")?.scrollIntoView({behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block:"start"});
+  setTimeout(() => { S.dealCard = null; }, 2500);
+}
+
+/* ---------- Overview: the spending type section ---------- */
+function typeSection(){
+  const list = receipts(), C = cardsNow();
+  const R = typeReading(list, null);
+  if (!C.current && !R.ready) return typeProgressSection(R);
+  if (!C.current || C.unseen) return `<div class="section type-ready" id="sec-type">
+    <button class="tr-card" data-action="revealtype" aria-label="Reveal your spending type">${cardDown("wiggle")}</button>
+    <div class="tp-body"><span class="label">${C.unseen ? "A new card for your collection" : "Your spending type"}</span>
+      <h2>${C.unseen ? "Your type has changed!" : "Your card is ready!"}</h2>
+      <p class="small muted">${C.unseen ? "Your last two readings agree: the way you shop has shifted." : `You've collected ${R.n} expenses over ${R.days} days. Time to see what kind of shopper you are.`}</p>
+      <button class="btn" data-action="revealtype">Tap to reveal</button></div></div>`;
+  const T = TYPES[C.current], Rs = shownReading(list), deal = S.dealCard;
+  const n = Object.keys(C.unlocked).length;
+  const slots = TYPE_ORDER.map((code, i) => { const at = C.unlocked[code];
+    return at ? `<button class="slot got${code === C.current ? " cur" : ""}${code === deal ? " new" : ""}" style="--i:${i}" data-action="opentype" data-code="${code}" aria-label="${esc(TYPES[code].name)}, unlocked ${fmtDate(at)}">${cardFront(code, "mini")}<span class="slot-n">${esc(TYPES[code].name)}</span><span class="slot-d">${fmtDate(at)}</span></button>`
+      : `<span class="slot" style="--i:${i}" aria-label="Not unlocked yet">${cardDown("mini")}<span class="slot-n">?</span><span class="slot-d">&nbsp;</span></span>`; }).join("");
+  return `<div class="section type-now" id="sec-type">
+    <div class="section-head"><h2>Your spending type</h2>${isDemo() ? `<span class="tag">example</span>` : ""}</div>
+    <div class="tn-row"><button class="tn-card" data-action="opentype" data-code="${C.current}" aria-label="Open your ${esc(T.name)} card">${cardFront(C.current, "mini")}</button>
+      <div class="tp-body"><span class="tn-name">${esc(T.name)} <span class="muted">(${dotCode(C.current)})</span></span>
+        <span class="small">“${esc(T.quote)}”</span>
+        ${Rs.bit && Rs.bit !== C.current ? `<span class="small muted">With a bit of ${esc(TYPES[Rs.bit].name)}</span>` : ""}
+        <span class="small muted">Your superpower: ${esc(T.sup[0])}</span>
+        <button class="linkbtn" data-action="opentype" data-code="${C.current}">Open your card</button></div></div>
+    <div class="album${deal ? " dealing" : ""}" role="list" aria-label="Your collection: ${n} of 8 cards">${slots}</div>
+    <p class="small muted album-note"><b class="num">${n}</b> of 8 cards. Habits shift, and so can your type. Keep adding expenses: when your type changes, a new card joins your collection.</p>
+    <details class="more" data-note="type"${S.openNotes.has("type")?" open":""}><summary class="small muted">How your type is worked out</summary>
+      <p class="small muted">Three questions, each scored from 0 to 100 from your receipts. <b>Price</b>: how much you save with offers, how much you pay above your own best price for the same product, and how many bottle deposits you take back. <b>Rhythm</b>: how often you shop, and how much goes on small top-up days. <b>Novelty</b>: how much you spend on products you buy again, and how much at your main shop.</p>
+      <p class="small muted">Your first card uses everything you've added. After that, once a month, your last ${TYPE_CFG.windowDays} days are read again. A new type has to come out ${TYPE_CFG.confirm} months in a row before its card joins your collection, so one unusual week doesn't change it.</p>
+      <p class="small muted">Only expenses with products count: monthly repeats and services such as rent, transport or eating out are left out. Bottle deposits aren't spending.</p>
+    </details></div>`;
+}
+function typeProgressSection(R){
+  const C = TYPE_CFG, n = Math.min(C.minExpenses, R.n);
+  const pips = Array.from({length: C.minExpenses}, (_, i) => `<i class="${i < n ? "on" : ""}"></i>`).join("");
+  const ok = v => v ? ` <span class="ok" aria-label="done">✓</span>` : "";
+  const daysLeft = Math.max(0, C.minDays - R.days);
+  return `<div class="type-progress card" id="sec-type" role="group" aria-label="Spending type progress">
+    ${cardDown("thumb")}
     <div class="tp-body">
       <span class="label">Your spending type</span>
-      <span class="tp-count"><b class="num">${n}</b> / ${TYPE_GOAL} expenses</span>
-      <div class="pips" role="progressbar" aria-valuemin="0" aria-valuemax="${TYPE_GOAL}" aria-valuenow="${n}">${pips}</div>
-      <span class="small muted">${done ? "You've collected enough to reveal your card! It will appear here with the next update." : "Collect at least 20 expenses to learn your spending type. Be patient and act natural to obtain reliable results!"}</span>
-      <span class="small muted">Scanned receipts and expenses you add by hand count. Monthly repeats don't, because they say little about how you shop.</span>
+      <span class="tp-count"><b class="num">${n}</b> / ${C.minExpenses} expenses${ok(n >= C.minExpenses)}</span>
+      <div class="pips" role="progressbar" aria-valuemin="0" aria-valuemax="${C.minExpenses}" aria-valuenow="${n}">${pips}</div>
+      <span class="small tp-cond">${R.days >= C.minDays ? `${C.minDays} days${ok(true)}` : R.n ? `${daysLeft} more day${plural(daysLeft)} to go` : `at least ${C.minDays} days`} · ${Math.min(R.shopDays, C.minShopDays)} / ${C.minShopDays} shopping days${ok(R.shopDays >= C.minShopDays)}</span>
+      <span class="small muted">Collect at least ${C.minExpenses} expenses to learn your spending type. Be patient and act natural to obtain reliable results!</span>
+      <span class="small muted">Scanned receipts and expenses you add by hand count, over at least ${C.minDays} days and ${C.minShopDays} different shopping days. Monthly repeats and services such as rent or eating out don't, because they say little about how you shop.</span>
     </div></div>`;
 }
 
@@ -617,6 +989,8 @@ function viewHome(A, list){
   const prods = Object.entries(M.prods).filter(([k]) => regular.has(k)).sort((a,b)=>b[1]-a[1]).slice(0,5);
   const perYear = k => A.products[k].total / Math.max(1, A.mks.length) * 12;
   const D = decompose(list, mk, A.curMk), I = homeInsights(A, list, mk, D);
+  // a card waiting to be revealed goes near the top, so it isn't missed; otherwise the section sits at the end
+  const TS = typeSection(), tsTop = TS.includes("type-ready");
   return `
   <div class="section">
     <div class="monthbar"><button class="chev" data-month="-1" ${pos<=0?"disabled":""} aria-label="Previous month">‹</button><span class="m">${mkLabel(mk,true)}</span><button class="chev" data-month="1" ${pos>=allM.length-1?"disabled":""} aria-label="Next month">›</button></div>
@@ -635,6 +1009,7 @@ function viewHome(A, list){
       <p class="small muted">Standard deviation shows how much your monthly spending varies from the average, so you can tell whether a month is usual or unusual. The typical range is the average plus or minus one standard deviation.</p>
     </details>`:""}
   </div>
+  ${tsTop ? TS : ""}
   ${guideSection(I)}
   ${decompSection(A, list, mk, D, I)}
   <div class="section" id="sec-cats">
@@ -658,7 +1033,7 @@ function viewHome(A, list){
   <div class="section" id="sec-months"><h2>Month by month</h2>${barChart(A, mk)}
     ${I.trend ? `<p class="takeaway">${I.trend}</p>` : ""}
     <details class="more chart-note" data-note="months"${S.openNotes.has("months")?" open":""}><summary class="small muted">How to read this chart</summary><p class="small muted">Bars: monthly totals. Dashed line: your monthly average. Includes every category, rent and bills too.</p></details></div>
-  ${typeProgressSection()}`;
+  ${tsTop ? "" : TS}`;
 }
 
 /* ---------- Found for you ----------
@@ -1155,7 +1530,9 @@ async function loadData(){
   if (rul.error) console.error(rul.error);
   try { await generateRecurring(); } catch(e){ console.error("repeats", e); }
   if (prof.data){ S.currency = prof.data.currency || "EUR"; S.aliases = prof.data.aliases || {}; fmtCache = {}; }
+  loadCards(prof.data);
   S.loaded = true; render();
+  monthlyTypeReading().then(() => { if (S.cards.unseen) render(); }).catch(e => console.error("type", e));
   refreshUsage();
   markActive(prof.data);
 }
@@ -1461,7 +1838,15 @@ document.addEventListener("click", e => {
   }
   else if (a === "signout"){ closeSheet(); sb.auth.signOut(); }
   else if (a === "delaccount") deleteAccount();
+  else if (a === "revealtype") revealType();
+  else if (a === "opentype") openTypeCard(t.dataset.code);
+  else if (a === "tcflip"){ if (!t.closest(".revealing")) t.classList.toggle("flipped"); }
+  else if (a === "tcclose"){ const C = cardsNow(); if (C.pending) delete C.pending; closeTypeCard(); }
+  else if (a === "tcdone") finishReveal();
 });
+// pictures for each type are optional (icons/types/<name>.png): without one, the card shows its first letter
+document.addEventListener("error", e => { if (e.target.classList?.contains("tc-art")) e.target.remove(); }, true);
+document.addEventListener("load", e => { if (e.target.classList?.contains("tc-art")) e.target.parentNode.classList.add("has-art"); }, true);
 document.addEventListener("input", e => {
   if (e.target.id === "q"){ S.q = e.target.value; S._focusQ = true; render(); S._focusQ = false; return; }
   if (S.draft) onEditorInput(e);
@@ -1472,7 +1857,10 @@ document.addEventListener("change", async e => {
   if (S.draft && (e.target.tagName === "SELECT" || e.target.dataset?.f === "gift")) onEditorInput(e);
 });
 document.addEventListener("toggle", e => { const k = e.target.dataset?.note; if (k) S.openNotes[e.target.open ? "add" : "delete"](k); }, true);
-document.addEventListener("keydown", e => { if (e.key === "Escape" && $("#sheetRoot").firstChild) closeSheet(); });
+document.addEventListener("keydown", e => {
+  if ((e.key === "Enter" || e.key === " ") && e.target.classList?.contains("tc-flip")){ e.preventDefault(); e.target.click(); return; }
+  if (e.key === "Escape" && $("#sheetRoot").firstChild){ if ($(".tc-stage")){ const C = cardsNow(); if (C.pending) delete C.pending; closeTypeCard(); } else closeSheet(); }
+});
 function fromHash(){ const h = location.hash.slice(1); if (Object.hasOwn(VIEWS, h)){ S.view = h; if (S.user) render(); } }
 window.addEventListener("hashchange", fromHash);
 
@@ -1494,7 +1882,7 @@ else {
     if (event === "USER_UPDATED"){ S.pendingReset = false; return; }
     const u = session?.user || null;
     if (u && (!S.user || S.user.id !== u.id)){ S.user = u; setTimeout(enterApp, 0); }
-    else if (!u && S.user !== null){ S.user = null; S.real = []; S.loaded = false; S.aliases = {}; S.used = null; showAuth("signin"); }
+    else if (!u && S.user !== null){ S.user = null; S.real = []; S.loaded = false; S.aliases = {}; S.used = null; S.cards = normCards(null); S.demoCards = null; showAuth("signin"); }
     else if (!u && event === "INITIAL_SESSION") { S.user = null; showAuth("signin"); }
   });
 }
